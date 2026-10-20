@@ -188,13 +188,6 @@ The host name problem was the main one, but not the only one.
 - **etcd rendezvous and Training Operator v1.** Training Operator does not set a rendezvous ID, so torchrun uses the ID `none` for every job. The first job closes the rendezvous `none` in etcd, and every job after it fails with `RendezvousClosedError`. I set `PET_RDZV_ID` from the job name and used `generateName`, so each run gets a new ID.
 - **No etcd client in the NVIDIA image.** The `etcd-v2` backend needs `python-etcd`. Without it, torchrun stops with `EtcdStubError: The 'etcd' module is required but not installed`. The latest release, 0.4.5, is from 2017, and it still works on Python 3.12.
 - **Two operators, one CRD.** Training Operator v1 brings its own `MPIJob` CRD (`kubeflow.org/v1`), which conflicts with the stand-alone MPI Operator (`v2beta1`). If Kueue was running while the MPI Operator was installed, Kueue keeps logging `Failed to watch *v2beta1.MPIJob` after you remove it.
-- **An `NCCL_IB_HCA` list from another shape.** On BM.GPU4.8, `mlx5_4` is `eth0`, the front-end NIC. A list copied from another GPU shape includes it and leaves out two RDMA NICs. This loop shows which network interface belongs to each RDMA device:
-
-  ```bash
-  for d in /sys/class/infiniband/*; do echo "$(basename "$d") $(ls "$d/device/net")"; done
-  ```
-
-- **A warning I could not explain.** Every pod logged more than 120 `NCCL WARN NET/MLX5: Call to mlx5dv_devx_general_cmd failed with error Remote I/O error` lines. The bandwidth was the same in every run, so I left it alone.
 
 ## How it ended
 
