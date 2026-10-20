@@ -12,7 +12,7 @@ pagination.pagerSize = 5
   contentTypeName = "posts"
   showMenuItems = 2
   fullWidthTheme = false
-  centerTheme = false
+  centerTheme = true
   subtitle = "It worked on one node."
   # The theme has no default text for these labels.
   readMore = "Read more"
