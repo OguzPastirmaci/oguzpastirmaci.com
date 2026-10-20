@@ -1,7 +1,7 @@
 +++
 title = "Running PyTorch Jobs on OKE Using Host Network with RDMA"
 date = "2026-10-20"
-draft = true
+draft = false
 tags = ["oke", "rdma", "pytorch", "nccl", "kubeflow", "kueue", "volcano"]
 description = "Multi-node PyTorch on OKE over RDMA with Kubeflow Trainer v2, Kueue, Volcano and Training Operator v1, tested on 2 x BM.GPU4.8."
 Toc = true
