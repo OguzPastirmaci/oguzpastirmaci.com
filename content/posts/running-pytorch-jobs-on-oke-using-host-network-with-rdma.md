@@ -18,37 +18,26 @@ The guide runs the same job in four ways:
 
 Every example runs one small PyTorch DDP script on all GPUs of two nodes. The script also measures `all_reduce` bandwidth, so you can confirm that NCCL uses RDMA.
 
-
-This post is an updated version of the [guide in the oci-hpc-oke repository](https://github.com/oracle-quickstart/oci-hpc-oke/blob/main/docs/running-pytorch-jobs-on-oke-using-hostnetwork-with-rdma.md). The earlier version had Volcano and Training Operator v1 examples that trained YOLOv5 on 1 GPU per node. These are the changes:
-
-- New sections for Kubeflow Trainer v2 and for Kueue topology-aware scheduling.
-- All examples use all 8 GPUs of each node and one self-contained DDP script.
-- The NCCL settings are for BM.GPU4.8. The earlier version had the values for BM.GPU.B4.8.
-- The NVIDIA PyTorch image includes the RDMA libraries, so the pods do not install them at start.
-- The Volcano jobs use gang scheduling (`minAvailable: 2`).
-- The `PyTorchJob` examples use the same value for `minReplicas` and `maxReplicas`.
-- The etcd `PyTorchJob` gets a new rendezvous ID for each run. In the earlier version, every etcd job after the first one failed with `RendezvousClosedError`.
-- The etcd examples install `python-etcd`, which the `etcd-v2` backend needs.
-- New sections for RDMA verification and troubleshooting.
 ## Tested Versions
 
 All steps in this guide were tested with these versions.
 
 | Component | Version |
 | --- | --- |
-| Cluster | OKE v1.36.4, deployed with the [oci-hpc-oke](https://github.com/oracle-quickstart/oci-hpc-oke) stack |
+| Cluster | OKE v1.36.4 |
 | GPU nodes | 2 x BM.GPU4.8 in one HPC island |
 | Node image | `Canonical-Ubuntu-24.04-2026.02.28-0-KERNEL-ORACLE-6.8-DOCA-OFED-3.3.0-GPU-595-OPEN-CUDA-13.2-2026.07.16-0` |
 | Container image | `nvcr.io/nvidia/pytorch:26.09-py3` (PyTorch 2.14.0a0, NCCL 2.31.2, CUDA 13.4.1) |
 | Kubeflow Trainer | v2.3.0, with JobSet v0.12.0 |
-| Kueue | 0.20.0, installed by the stack |
+| Kueue | 0.20.0 |
 | Volcano | v1.16.0 |
 | Kubeflow Training Operator | v1.9.4 |
 | etcd | v3.5.34 |
 
 ## Prerequisites
 
-- An OKE cluster with RDMA-enabled GPU nodes, deployed with the [oci-hpc-oke](https://github.com/oracle-quickstart/oci-hpc-oke) stack
+- An OKE cluster with RDMA-enabled GPU nodes
+- Pods can request GPUs as `nvidia.com/gpu`, for example through the NVIDIA GPU Operator
 - `kubectl` and `helm` with access to the cluster
 - Basic knowledge of PyTorch distributed training with `torchrun`
 
@@ -83,7 +72,7 @@ spec:
 | `IPC_LOCK` capability | Lets NCCL pin memory for RDMA operations. |
 | `SYS_ADMIN` capability | Lets the training framework do additional system-level operations. |
 
-The GPU nodes have the taint `nvidia.com/gpu=present:NoSchedule`. The cluster adds a matching toleration to every pod that requests `nvidia.com/gpu`, so the examples do not set one.
+In the test cluster, the GPU nodes have the taint `nvidia.com/gpu=present:NoSchedule`. The cluster adds a matching toleration to every pod that requests `nvidia.com/gpu`, so the examples do not set one. If your GPU nodes have a taint that the cluster does not tolerate automatically, add a toleration to the pod template.
 
 > **Important**
 >
@@ -91,11 +80,19 @@ The GPU nodes have the taint `nvidia.com/gpu=present:NoSchedule`. The cluster ad
 
 ### NCCL Settings
 
-The examples set the NCCL parameters for BM.GPU4.8 as environment variables. For other shapes, use the values in [Recommended NCCL/RCCL Parameters by Shape](https://github.com/oracle-quickstart/oci-hpc-oke/blob/main/docs/recommended-nccl-rccl-parameters-by-shape.md). The stack also creates a ConfigMap with these values for each GPU shape. To load the values from the ConfigMap, see [Using the NCCL/RCCL Parameters ConfigMap in Job Manifests](https://github.com/oracle-quickstart/oci-hpc-oke/blob/main/docs/using-nccl-rccl-parameters-configmap.md).
+The examples set the NCCL parameters for BM.GPU4.8 as environment variables. For other shapes, set `NCCL_IB_HCA` to the RDMA interfaces of that shape.
+
+To see the network interface of each RDMA device, run this command on a GPU node or in a host network pod:
+
+```bash
+for d in /sys/class/infiniband/*; do echo "$(basename "$d") $(ls "$d/device/net")"; done
+```
+
+On BM.GPU4.8, `mlx5_4` is `eth0` (the front-end interface) and `mlx5_5` is `eth1`, which is down. The other 16 devices are the RDMA interfaces (`rdma0` to `rdma15`). The examples list all 16 RDMA devices in `NCCL_IB_HCA`.
 
 > **Important**
 >
-> `NCCL_IB_HCA` is different for each shape. A list for another shape can include the front-end network interface and leave out RDMA interfaces. For example, on BM.GPU4.8, `mlx5_4` is the front-end interface (`eth0`).
+> `NCCL_IB_HCA` is different for each shape. A list for another shape can include the front-end network interface and leave out RDMA interfaces.
 
 The examples set `NCCL_DEBUG=INFO` and `NCCL_DEBUG_SUBSYS=INIT,NET`, so the logs show which network NCCL uses. For production jobs, set `NCCL_DEBUG=WARN`.
 
@@ -317,6 +314,12 @@ Important points about the `TrainJob`:
 - `runtimePatches` mounts the script ConfigMap into the `node` container.
 - Trainer v2 sets `PET_MASTER_ADDR` to `ddp-rdma-node-0-0.ddp-rdma`. This name resolves to the IP address of the first node, because the pod uses `ClusterFirstWithHostNet`.
 
+Wait until the job completes. The first job also downloads the container image, which is about 12 GB, so it can take several minutes.
+
+```bash
+kubectl wait --for=condition=Complete trainjob/ddp-rdma --timeout=20m
+```
+
 To see the output of global rank 0, run this command:
 
 ```bash
@@ -341,7 +344,87 @@ To delete the job, run `kubectl delete trainjob ddp-rdma`.
 
 ### Step 4 (Optional): Use Kueue Topology-Aware Scheduling
 
-The stack installs Kueue. It also creates a topology-aware LocalQueue for each RDMA GPU shape. The queue name is the shape in lowercase with dots replaced by dashes, plus `-rdma-topology-aware`. For BM.GPU4.8, the name is `bm-gpu4-8-rdma-topology-aware`. For more information, see [Using RDMA Network Locality When Running Workloads on OKE](https://github.com/oracle-quickstart/oci-hpc-oke/blob/main/docs/using-rdma-network-locality-when-running-workloads-on-oke.md).
+Kueue can place all pods of a job close to each other in the RDMA network. This step uses Kueue topology-aware scheduling to put both pods in one HPC island.
+
+Install Kueue:
+
+```bash
+helm install kueue oci://registry.k8s.io/kueue/charts/kueue --version 0.20.0 \
+  --namespace kueue-system --create-namespace --wait
+```
+
+The default configuration of the chart includes the `TrainJob` integration. If you install Kueue before Trainer v2, you do not need to restart Kueue. Kueue starts its `TrainJob` integration when the `TrainJob` CRD becomes available.
+
+The topology uses node labels that describe the position of each node in the RDMA network:
+
+- `oci.oraclecloud.com/rdma.hpc_island_id`
+- `oci.oraclecloud.com/rdma.network_block_id`
+- `oci.oraclecloud.com/rdma.local_block_id`
+
+Your GPU nodes must have these labels. To check the labels, run this command:
+
+```bash
+kubectl get nodes -L oci.oraclecloud.com/rdma.hpc_island_id,oci.oraclecloud.com/rdma.network_block_id,oci.oraclecloud.com/rdma.local_block_id
+```
+
+Save this manifest as `kueue-rdma-topology.yaml`. It creates the topology, a resource flavor for the BM.GPU4.8 nodes, a ClusterQueue and a LocalQueue.
+
+```yaml
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: Topology
+metadata:
+  name: rdma-topology
+spec:
+  levels:
+  - nodeLabel: oci.oraclecloud.com/rdma.hpc_island_id
+  - nodeLabel: oci.oraclecloud.com/rdma.network_block_id
+  - nodeLabel: oci.oraclecloud.com/rdma.local_block_id
+  - nodeLabel: kubernetes.io/hostname
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ResourceFlavor
+metadata:
+  name: bm-gpu4-8
+spec:
+  nodeLabels:
+    node.kubernetes.io/instance-type: BM.GPU4.8
+  topologyName: rdma-topology
+  tolerations:
+  - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ClusterQueue
+metadata:
+  name: bm-gpu4-8
+spec:
+  namespaceSelector: {}
+  resourceGroups:
+  - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
+    flavors:
+    - name: bm-gpu4-8
+      resources:
+      - { name: cpu, nominalQuota: 255 }
+      - { name: memory, nominalQuota: 3800Gi }
+      - { name: nvidia.com/gpu, nominalQuota: 16 }
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: LocalQueue
+metadata:
+  name: bm-gpu4-8
+  namespace: default
+spec:
+  clusterQueue: bm-gpu4-8
+```
+
+```bash
+kubectl apply -f kueue-rdma-topology.yaml
+```
+
+Important points about these objects:
+
+- The `Topology` lists the levels from the largest domain (the HPC island) to a single node.
+- The `ResourceFlavor` selects the BM.GPU4.8 nodes and connects them to the topology. Its toleration lets Kueue place pods on the GPU nodes.
+- The quotas in the `ClusterQueue` are the allocatable resources of the two GPU nodes. Change them to match your nodes.
 
 Save this manifest as `trainer-v2-trainjob-kueue.yaml`.
 
@@ -351,7 +434,7 @@ kind: TrainJob
 metadata:
   name: ddp-rdma-kueue
   labels:
-    kueue.x-k8s.io/queue-name: bm-gpu4-8-rdma-topology-aware
+    kueue.x-k8s.io/queue-name: bm-gpu4-8
 spec:
   runtimeRef:
     name: torch-distributed-rdma
@@ -385,7 +468,7 @@ spec:
 
 This manifest has two changes from the previous `TrainJob`:
 
-- The `kueue.x-k8s.io/queue-name` label sends the job to the topology-aware queue.
+- The `kueue.x-k8s.io/queue-name` label sends the job to the `bm-gpu4-8` LocalQueue.
 - The `kueue.x-k8s.io/podset-required-topology` annotation puts all pods in one HPC island. If the job does not fit in one island, it waits. To let Kueue use a larger domain when the job does not fit, use `kueue.x-k8s.io/podset-preferred-topology`.
 
 ```bash
@@ -396,11 +479,15 @@ kubectl get workloads
 Kueue admits the job, and then Trainer v2 starts the pods. Example output:
 
 ```
-NAME                            QUEUE                           RESERVED IN                     ADMITTED   FINISHED   AGE
-trainjob-ddp-rdma-kueue-7163a   bm-gpu4-8-rdma-topology-aware   bm-gpu4-8-rdma-topology-aware   True                  11s
+NAME                            QUEUE       RESERVED IN   ADMITTED   FINISHED   AGE
+trainjob-ddp-rdma-kueue-39f63   bm-gpu4-8   bm-gpu4-8     True                  1s
 ```
 
-If you install Trainer v2 after Kueue, you do not need to restart Kueue. Kueue starts its `TrainJob` integration when the `TrainJob` CRD becomes available.
+Wait until the job completes:
+
+```bash
+kubectl wait --for=condition=Complete trainjob/ddp-rdma-kueue --timeout=10m
+```
 
 ## Volcano
 
@@ -501,6 +588,7 @@ spec:
 ```bash
 kubectl apply -f volcano-c10d.yaml
 kubectl get vcjob ddp-volcano-c10d
+kubectl wait --for=jsonpath='{.status.state.phase}'=Completed vcjob/ddp-volcano-c10d --timeout=10m
 kubectl logs ddp-volcano-c10d-worker-0 | grep -E '^(host|world size|all_reduce|step|training finished)'
 ```
 
@@ -642,6 +730,7 @@ spec:
 ```bash
 kubectl apply -f volcano-etcd.yaml
 kubectl get vcjob ddp-volcano-etcd
+kubectl wait --for=jsonpath='{.status.state.phase}'=Completed vcjob/ddp-volcano-etcd --timeout=10m
 kubectl logs ddp-volcano-etcd-worker-0 | grep -E '^(host|world size|all_reduce|step|training finished)'
 ```
 
@@ -657,21 +746,17 @@ Kubeflow Training Operator v1 runs PyTorch jobs with the `PyTorchJob` resource. 
 
 > **Important**
 >
-> Training Operator v1 includes its own `MPIJob` CRD (`kubeflow.org/v1`). It conflicts with the stand-alone MPI Operator (`kubeflow.org/v2beta1`) that the stack installs by default. Remove the MPI Operator before you install Training Operator v1. Without this step, the Training Operator pod restarts continuously.
+> Training Operator v1 includes its own `MPIJob` CRD (`kubeflow.org/v1`). It conflicts with the stand-alone MPI Operator (`kubeflow.org/v2beta1`). If the MPI Operator is installed in your cluster, remove it before you install Training Operator v1. Use the manifest or Helm chart that installed it, and make sure that the `mpijobs.kubeflow.org` CRD is also removed. Without this step, the Training Operator pod restarts continuously.
 >
-> After this change, these items are affected:
->
-> - The NCCL test manifests in the oci-hpc-oke repository use the MPI Operator, so they do not work.
-> - Kueue logs `Failed to watch *v2beta1.MPIJob` errors again and again, because its MPIJob integration expects `v2beta1`.
+> If Kueue was running while the MPI Operator was installed, Kueue logs `Failed to watch *v2beta1.MPIJob` errors after you remove the MPI Operator, because its MPIJob integration expects `v2beta1`.
 
 ### Step 1: Install Training Operator
 
 ```bash
-kubectl delete -f https://raw.githubusercontent.com/oracle-quickstart/oci-hpc-oke/refs/heads/main/manifests/mpi-operator/mpi-operator.yaml
 kubectl apply --server-side --force-conflicts -k "github.com/kubeflow/training-operator.git/manifests/overlays/standalone?ref=v1.9.4"
 ```
 
-The first command also removes the `MPIJob` CRD. The second command needs `--server-side --force-conflicts`, because the `PyTorchJob` and `PaddleJob` CRDs are larger than the client-side annotation limit of `kubectl`.
+This command needs `--server-side --force-conflicts`, because the `PyTorchJob` and `PaddleJob` CRDs are larger than the client-side annotation limit of `kubectl`.
 
 ### Using c10d as the Rendezvous Backend
 
@@ -747,6 +832,7 @@ spec:
 ```bash
 kubectl apply -f pytorchjob-c10d.yaml
 kubectl get pytorchjob ddp-pytorchjob-c10d
+kubectl wait --for=condition=Succeeded pytorchjob/ddp-pytorchjob-c10d --timeout=10m
 kubectl logs ddp-pytorchjob-c10d-worker-0 | grep -E '^(host|world size|all_reduce|step|training finished)'
 ```
 
@@ -837,6 +923,7 @@ This manifest uses `generateName`, so use `kubectl create`, not `kubectl apply`:
 ```bash
 kubectl create -f pytorchjob-etcd.yaml
 kubectl get pytorchjobs
+kubectl wait --for=condition=Succeeded pytorchjob/<job-name> --timeout=10m
 kubectl logs <job-name>-worker-0 | grep -E '^(host|world size|all_reduce|step|training finished)'
 ```
 
@@ -873,7 +960,7 @@ These results are from the tests on 2 x BM.GPU4.8 (16 GPUs). The table shows the
 | Volcano, etcd | 191.1 GB/s |
 | Training Operator v1, c10d | 191.0 GB/s |
 | Training Operator v1, etcd | 191.0 GB/s |
-| nccl-tests `all_reduce_perf` from the oci-hpc-oke repository (reference) | 182.84 GB/s out-of-place, 190.17 GB/s in-place |
+| nccl-tests `all_reduce_perf` (reference) | 182.84 GB/s out-of-place, 190.17 GB/s in-place |
 
 ## Troubleshooting
 
@@ -883,4 +970,4 @@ These results are from the tests on 2 x BM.GPU4.8 (16 GPUs). The table shows the
 | `EtcdStubError: The 'etcd' module is required but not installed` | The image does not include `python-etcd`. | Install `python-etcd` in the image, or before you start `torchrun`. |
 | `RendezvousClosedError` with the `etcd-v2` backend | A previous job used the same rendezvous ID and closed the rendezvous. | Use a new rendezvous ID for each run. To delete all rendezvous data, delete the etcd pod and apply `etcd.yaml` again. |
 | `kubectl get queues` does not show Volcano queues. | Kueue LocalQueue uses the same short names. | Run `kubectl get queues.scheduling.volcano.sh`. |
-| The log shows `NCCL WARN NET/MLX5: Call to mlx5dv_devx_general_cmd failed with error Remote I/O error`. | Not known. These warnings appeared in all tests on BM.GPU4.8, including the NCCL tests from the oci-hpc-oke repository. | No action was necessary in the tests. All jobs still used RDMA at full bandwidth. |
+| The log shows `NCCL WARN NET/MLX5: Call to mlx5dv_devx_general_cmd failed with error Remote I/O error`. | Not known. These warnings appeared in all tests on BM.GPU4.8, including nccl-tests. | No action was necessary in the tests. All jobs still used RDMA at full bandwidth. |
