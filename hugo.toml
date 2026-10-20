@@ -1,0 +1,27 @@
+baseURL = "https://oguzpastirmaci.com/"
+locale = "en-US"
+title = "Under the Model"
+theme = "terminal"
+pagination.pagerSize = 5
+
+# The theme's syntax highlighting needs CSS classes.
+[markup.highlight]
+  noClasses = false
+
+[params]
+  contentTypeName = "posts"
+  showMenuItems = 2
+  fullWidthTheme = false
+  centerTheme = false
+  subtitle = "GPUs, RDMA, and the trouble with node two."
+  # The theme has no default text for these labels.
+  readMore = "Read more"
+  readOtherPosts = "Read other posts"
+  menuMore = "Show more"
+
+  [params.logo]
+    logoText = "Under the Model"
+
+# From Hugo's GitHub Pages guide.
+[caches.images]
+  dir = ":cacheDir/images"
