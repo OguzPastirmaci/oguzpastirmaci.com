@@ -1,5 +1,5 @@
 +++
-title = "The Trouble With Node Two: torchrun on Host Network"
+title = "Why torchrun Can't Find Node Two on the Host Network"
 date = "2026-10-20"
 draft = false
 tags = ["pytorch", "torchrun", "rdma", "nccl", "kubernetes", "oke"]
