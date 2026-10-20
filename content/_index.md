@@ -1,4 +1,4 @@
 +++
 +++
 
-GPUs, RDMA, and the trouble with node two.
+It worked on one node.
