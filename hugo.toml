@@ -13,7 +13,7 @@ pagination.pagerSize = 5
   showMenuItems = 2
   fullWidthTheme = false
   centerTheme = true
-  subtitle = "It worked on one node."
+  subtitle = "Notes on GPUs, RDMA, Kubernetes and distributed training."
   # The theme has no default text for these labels.
   readMore = "Read more"
   readOtherPosts = "Read other posts"

@@ -1,4 +1,4 @@
 +++
 +++
 
-It worked on one node.
+Notes on GPUs, RDMA, Kubernetes and distributed training.
