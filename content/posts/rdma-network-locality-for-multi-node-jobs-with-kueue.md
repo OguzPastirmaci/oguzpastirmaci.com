@@ -26,7 +26,7 @@ This post starts from a cluster without Kueue. The post labels the nodes, instal
 
 ## The test cluster
 
-I did not have eight bare metal GPU hosts spread over four local blocks to spare. So I tested on an OKE cluster with eight small CPU nodes. I gave them a made-up RDMA topology with node labels, and 8 fake GPUs each. Kueue's placement only looks at node labels, taints and capacity, so it treats these nodes the way it treats GPU hosts. Most pods run `pause` and nothing else.
+I did not have eight bare metal GPU hosts spread over four local blocks to spare. So I tested on an OKE cluster with eight small CPU nodes. I gave them a made-up RDMA topology with node labels. Kueue's placement only looks at node labels, taints and capacity, so it treats these nodes the way it treats GPU hosts. Most pods run `pause` and nothing else.
 
 - OKE v1.36.4
 - kubectl v1.37.1, Helm v4.3.0 and jq 1.8.2 on my Mac
