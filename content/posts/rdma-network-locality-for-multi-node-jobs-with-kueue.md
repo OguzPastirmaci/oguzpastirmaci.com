@@ -22,7 +22,7 @@ The default Kubernetes scheduler knows none of this. It places each pod on its o
 
 Kueue's topology-aware scheduling (TAS) fixes that. You describe the topology once. Kueue then places all the pods of a job as close together as it can. Or it keeps the job waiting until they fit where you require.
 
-This post starts from a cluster without Kueue. The cluster had cert-manager, but the Kueue and JobSet charts do not use it by default. The post labels the nodes, installs Kueue, creates the four Kueue objects, and runs thirteen experiments. They show how Kueue decides and what it does after a job starts. Every manifest and command in the post ran as written. Long files are collapsed, so click a file name to open it.
+This post starts from a cluster without Kueue. The post labels the nodes, installs Kueue, creates the four Kueue objects, and runs thirteen experiments. They show how Kueue decides and what it does after a job starts. Every manifest and command in the post ran as written. Long files are collapsed, so click a file name to open it.
 
 ## The test cluster
 
