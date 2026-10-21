@@ -26,7 +26,7 @@ This is going to be a long post, so bear with me. I start from a cluster without
 
 ## The test cluster
 
-I tested on an OKE cluster with eight nodes. Most pods run `pause` and nothing else.
+I tested on an OKE cluster with eight GPU nodes and three system nodes. Most pods run `pause` and nothing else.
 
 - OKE v1.36.4
 - kubectl v1.37.1, Helm v4.3.0 and jq 1.8.2 on my Mac
@@ -87,6 +87,8 @@ done
 {{< /code >}}
 
 ```bash
+chmod +x label-topology.sh
+
 ./label-topology.sh oke.oraclecloud.com/pool.name=oke-rdma
 ```
 
@@ -233,6 +235,10 @@ while read -r pod node; do
   printf '%-32s %-14s %-14s %-12s\n' "$pod" "$node" "$nb" "$lb"
 done
 {{< /code >}}
+
+```bash
+chmod +x placement.sh
+```
 
 I used these commands for Kueue's view of a job:
 
@@ -612,7 +618,7 @@ Admitted=False reason=NoReservation message=The workload has no reservation
 PodsReady=False reason=WaitForStart message=Not all pods are ready or succeeded
 ```
 
-A PodSet without requests gets no flavor. In a ClusterQueue with only TAS flavors, that means no TAS flavor, and the job waits ([`tas_flavorassigner.go`](https://github.com/kubernetes-sigs/kueue/blob/v0.20.2/pkg/scheduler/flavorassigner/tas_flavorassigner.go#L150-L161)).
+A PodSet without requests gets no flavor, unless it is in a PodSet group ([`flavorassigner.go`](https://github.com/kubernetes-sigs/kueue/blob/v0.20.2/pkg/scheduler/flavorassigner/flavorassigner.go#L528-L562)). In a ClusterQueue with only TAS flavors, that means no TAS flavor, and the job waits ([`tas_flavorassigner.go`](https://github.com/kubernetes-sigs/kueue/blob/v0.20.2/pkg/scheduler/flavorassigner/tas_flavorassigner.go#L150-L161)).
 
 The first fix is a small request:
 
@@ -684,7 +690,16 @@ The `no-requests` job, still waiting, was admitted right after this change, with
 ```
 POD                              NODE           NETWORK_BLOCK  LOCAL_BLOCK
 no-requests-fxmx9                10.140.75.175  nb-a           lb-a2
-{"name":"main","flavors":null,"topologyAssignment":null}
+```
+
+The PodSet assignment has no flavor and no topology levels:
+
+```bash
+kubectl get workload -o json | jq -c '.items[] | select(.metadata.ownerReferences[0].name=="no-requests") | .status.admission.podSetAssignments[] | {name, count, flavors, levels: .topologyAssignment.levels}'
+```
+
+```
+{"name":"main","count":1,"flavors":null,"levels":null}
 ```
 
 Then I deleted the `with-request` job and created it again. This time it got the `system` flavor and landed on a system node:
@@ -803,7 +818,7 @@ If a node under a running TAS job fails, Kueue can swap in a free node. It does 
 
 `TASReplaceNodeOnNodeTaints` is beta and on since v0.17 ([`kube_features.go`](https://github.com/kubernetes-sigs/kueue/blob/v0.20.2/pkg/features/kube_features.go#L1095-L1097), [docs](https://github.com/kubernetes-sigs/kueue/blob/v0.20.2/site/content/en/docs/concepts/topology_aware_scheduling.md#L229-L276)). It also treats a node as failed when the node has a `NoExecute` or `NoSchedule` taint that the pods do not tolerate. Kueue waits until the pods of the job stop running on that node.
 
-With required placement, the new node must be in the same domain as the rest of the job ([`tas_flavor_snapshot.go`](https://github.com/kubernetes-sigs/kueue/blob/v0.20.2/pkg/cache/scheduler/tas_flavor_snapshot.go#L1197-L1199)). With preferred placement, Kueue can pick a node in another domain, so the job can lose its locality ([`scheduler_tas_test.go`](https://github.com/kubernetes-sigs/kueue/blob/v0.20.2/pkg/scheduler/scheduler_tas_test.go#L919)). This test uses required placement.
+With required placement, the new node must be in the same domain as the rest of the job ([`tas_flavor_snapshot.go`](https://github.com/kubernetes-sigs/kueue/blob/v0.20.2/pkg/cache/scheduler/tas_flavor_snapshot.go#L1197-L1212)). With preferred placement, Kueue can pick a node in another domain, so the job can lose its locality ([`scheduler_tas_test.go`](https://github.com/kubernetes-sigs/kueue/blob/v0.20.2/pkg/scheduler/scheduler_tas_test.go#L919)). This test uses required placement.
 
 {{< code language="yaml" title="swap-3.yaml" open="false" >}}
 apiVersion: batch/v1
@@ -843,6 +858,8 @@ A training process that gets `SIGTERM` usually exits with a non-zero code, so th
 ```bash
 kubectl apply -f swap-3.yaml
 
+kubectl wait --for=jsonpath='{.status.ready}'=3 job/swap-3 --timeout=3m
+
 ./placement.sh job-name=swap-3
 ```
 
@@ -859,6 +876,10 @@ Then I tainted the node of pod 1, `10.140.68.178`:
 NODE=$(kubectl get pods -l job-name=swap-3,batch.kubernetes.io/job-completion-index=1 -o jsonpath='{.items[0].spec.nodeName}')
 
 kubectl taint node "$NODE" maintenance=true:NoExecute
+
+kubectl wait --for=jsonpath='{.status.failed}'=1 job/swap-3 --timeout=3m
+
+kubectl wait --for=jsonpath='{.status.ready}'=3 job/swap-3 --timeout=3m
 
 ./placement.sh job-name=swap-3
 ```
@@ -1346,7 +1367,7 @@ Node affinity and pod affinity with the same labels work pod by pod. The default
 - Use `podset-preferred-topology` on the local block for most jobs. It keeps the pods close when there is room and falls back when there is not.
 - Use `podset-required-topology` only when the job is useless outside one domain. Such a job can wait forever, suspended with a condition and no pods.
 - When a job does not start, read the conditions of its Workload. Kueue says exactly what did not fit.
-- Give every pod a request, and add a flavor without a topology for launchers. In a ClusterQueue with only TAS flavors, a pod without requests never starts ([A pod with no requests](#a-pod-with-no-requests)).
+- Give every pod a request, and add a flavor without a topology for launchers. In a ClusterQueue with only TAS flavors, a pod without requests never starts, unless it is in a PodSet group ([A pod with no requests](#a-pod-with-no-requests)).
 - In a mixed ClusterQueue, give every GPU pod a TAS annotation. Without one, the pod goes to the flavor without a topology, and it never fits if that flavor has no GPUs ([PodSet groups](#podset-groups)).
 - Enable every job integration that you use. The default Helm values of v0.20.2 do not enable `kubeflow.org/pytorchjob` ([`values.yaml`](https://github.com/kubernetes-sigs/kueue/blob/v0.20.2/charts/kueue/values.yaml#L171-L190)). The running config on the test cluster listed `batch/job`, `jobset.x-k8s.io/jobset`, `trainer.kubeflow.org/trainjob` and `kubeflow.org/mpijob`, but not PyTorchJob.
 - Use slices for groups of pods that talk to each other the most, and multi-layer slices when the job has two levels of communication.

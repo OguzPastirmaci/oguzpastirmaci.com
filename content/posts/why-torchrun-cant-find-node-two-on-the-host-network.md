@@ -148,8 +148,10 @@ spec:
 ```bash
 kubectl apply -f dnscheck.yaml
 
-kubectl wait --for=condition=Ready pod/dnscheck-10-140-68-247 pod/dnscheck-10-140-88-37 --timeout=120s
+kubectl wait --for=condition=Ready pod/dnscheck-10-140-68-247 pod/dnscheck-10-140-88-37 --timeout=15m
 ```
+
+The first pod on a node also pulls the PyTorch image, which is large. That is why this wait has a long timeout.
 
 ```bash
 kubectl exec dnscheck-10-140-68-247 -- python3 -c '
@@ -358,8 +360,6 @@ kubectl wait --for=jsonpath='{.status.state.phase}'=Completed vcjob/ddp-volcano-
 
 kubectl logs ddp-volcano-c10d-worker-0 | grep -E '^(host|world size|all_reduce|step|training finished)'
 ```
-
-The first job on a node also pulls the PyTorch image, which is large. If it is the first job on the nodes, give the first `kubectl wait` more time.
 
 ### Training Operator v1
 
