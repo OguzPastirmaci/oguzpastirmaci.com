@@ -16,6 +16,8 @@ The write-up calls the first tier Tier-0. The diagram below calls the other two 
 
 In the OCI API, the groups of hosts under these tiers are a local block, a network block and an HPC island ([`ComputeBareMetalHost`](https://docs.oracle.com/en-us/iaas/tools/python/latest/api/core/models/oci.core.models.ComputeBareMetalHost.html)).
 
+OCI also has a two-tier network. [Oracle Acceleron's multiplanar network](https://blogs.oracle.com/cloud-infrastructure/first-principles-acceleron-multiplanar-networking) is made of several independent planes, and each plane is its own Clos fabric. Each NIC connects to one switch in each plane, and most deployments have two tiers of switches instead of three. This post uses the three-tier network, but the same logic applies to both. Pods under the same switches talk with less latency than pods whose traffic crosses more tiers. So you describe the tiers of your network as levels of a Topology, and Kueue places the pods the same way.
+
 The default Kubernetes scheduler knows none of this. It places each pod on its own, wherever the pod fits. A 4-node job can end up with two pods in one local block and two in another network block, and nothing tells you.
 
 Kueue's topology-aware scheduling (TAS) fixes that. You describe the topology once. Kueue then places all the pods of a job as close together as it can. Or it keeps the job waiting until they fit where you require.
