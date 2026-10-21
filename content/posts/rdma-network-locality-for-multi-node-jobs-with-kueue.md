@@ -169,7 +169,10 @@ spec:
 {{< /code >}}
 
 ```bash
-for f in topology resourceflavor clusterqueue localqueue; do kubectl apply -f $f.yaml; done
+kubectl apply -f topology.yaml
+kubectl apply -f resourceflavor.yaml
+kubectl apply -f clusterqueue.yaml
+kubectl apply -f localqueue.yaml
 kubectl get localqueue
 ```
 
