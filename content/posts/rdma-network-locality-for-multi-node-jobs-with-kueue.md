@@ -55,7 +55,7 @@ On bare metal GPU hosts, the instance metadata service (IMDS) returns the place 
 
 Kubernetes does not read IMDS, so the labels are yours to set. An OCID is longer than the 63 characters that a label value allows, so use a short form of each one, such as a hash. The value only has to be the same on all hosts in one block.
 
-The test nodes are VMs, and `rdmaTopologyData` returns 404 on them. So for the test, I set the labels by hand:
+For easier reading, this post uses short names such as `isl-1`, `nb-a` and `lb-a1` instead. This script sets them:
 
 {{< code language="bash" title="label-simulated.sh" open="false" >}}
 #!/usr/bin/env bash
