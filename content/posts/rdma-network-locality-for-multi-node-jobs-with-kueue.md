@@ -1,7 +1,7 @@
 +++
 title = "RDMA Network Locality for Multi-Node Jobs with Kueue"
 date = "2026-10-20"
-draft = true
+draft = false
 tags = ["kueue", "kubernetes", "rdma", "scheduling", "oke"]
 description = "How Kueue's topology-aware scheduling keeps the pods of a multi-node job in one RDMA local block or network block, tested step by step on a cluster without Kueue."
 +++
