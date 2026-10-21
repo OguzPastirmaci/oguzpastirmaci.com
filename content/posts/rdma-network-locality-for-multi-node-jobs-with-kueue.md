@@ -53,94 +53,9 @@ On bare metal GPU hosts, the instance metadata service (IMDS) returns the place 
 }
 ```
 
-Kubernetes does not read IMDS, so the labels are yours to set. An OCID is longer than the 63 characters that a label value allows, so the script below stores a 12-character SHA-256 hash of each one. The value only has to be the same on all hosts in one block.
+Kubernetes does not read IMDS, so the labels are yours to set. An OCID is longer than the 63 characters that a label value allows, so use a short form of each one, such as a hash. The value only has to be the same on all hosts in one block.
 
-The script starts a short-lived pod on each node, with the host network, reads IMDS, and labels the node. It skips a node that already has a local block label, for example from another labeling tool. Two tools with different value formats would split one block into two domains. The script needs `kubectl`, `jq` and `sha256sum`.
-
-{{< code language="bash" title="label-from-imds.sh" open="false" >}}
-#!/usr/bin/env bash
-# Label each node with its RDMA topology from the instance metadata service (IMDS).
-# Usage: label-from-imds.sh [node label selector]
-set -euo pipefail
-selector=${1:-}
-imds=http://169.254.169.254/opc/v2/host/rdmaTopologyData
-prefix=oci.oraclecloud.com/rdma
-# OCIDs are longer than the 63 characters a label value allows, so use a short hash.
-short() { printf '%s' "$1" | sha256sum | cut -c1-12; }
-for node in $(kubectl get nodes ${selector:+-l "$selector"} -o jsonpath='{.items[*].metadata.name}'); do
-  # Keep labels that another tool already set. Two value formats would split the domains.
-  existing=$(kubectl get node "$node" -o json | jq -r --arg k "$prefix.local_block_id" '.metadata.labels[$k] // empty')
-  if [ -n "$existing" ]; then
-    echo "$node: already labeled, skipped"
-    continue
-  fi
-  # A short-lived pod on the node's network reads IMDS, the same way a process on the host would.
-  pod="imds-$(printf '%s' "$node" | tr '.' '-')"
-  overrides=$(printf '{"spec":{"nodeName":"%s","hostNetwork":true,"tolerations":[{"operator":"Exists"}]}}' "$node")
-  kubectl run "$pod" -q --restart=Never --image=busybox:1.37 --overrides="$overrides" -- \
-    sh -c "wget -q -O - --header 'Authorization: Bearer Oracle' $imds 2>/dev/null || true" > /dev/null
-  kubectl wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$pod" --timeout=120s > /dev/null
-  json=$(kubectl logs "pod/$pod")
-  kubectl delete pod "$pod" --wait=false > /dev/null
-  island=$(jq -r '.customerHPCIslandId // empty' <<< "$json" 2>/dev/null || true)
-  block=$(jq -r '.customerNetworkBlock // empty' <<< "$json" 2>/dev/null || true)
-  local_block=$(jq -r '.customerLocalBlock // empty' <<< "$json" 2>/dev/null || true)
-  host=$(jq -r '.customerHostId // empty' <<< "$json" 2>/dev/null || true)
-  if [ -z "$island" ] || [ -z "$block" ] || [ -z "$local_block" ] || [ -z "$host" ]; then
-    echo "$node: no RDMA topology in IMDS, skipped"
-    continue
-  fi
-  # Hash before labeling, so a failed hash stops the script instead of writing empty values.
-  island=$(short "$island")
-  block=$(short "$block")
-  local_block=$(short "$local_block")
-  host=$(short "$host")
-  for value in "$island" "$block" "$local_block" "$host"; do
-    if [ "${#value}" -ne 12 ]; then
-      echo "$node: hashing failed" >&2
-      exit 1
-    fi
-  done
-  kubectl label node "$node" --overwrite \
-    "$prefix.hpc_island_id=$island" \
-    "$prefix.network_block_id=$block" \
-    "$prefix.local_block_id=$local_block" \
-    "$prefix.host_id=$host"
-done
-{{< /code >}}
-
-```bash
-./label-from-imds.sh oke.oraclecloud.com/pool.name=oke-cpu
-```
-
-The test nodes are VMs, so there is no RDMA topology, and the script says so:
-
-```
-10.140.65.205: no RDMA topology in IMDS, skipped
-10.140.68.178: no RDMA topology in IMDS, skipped
-...
-10.140.94.172: no RDMA topology in IMDS, skipped
-```
-
-From a pod on one of these VMs, `rdmaTopologyData` returns 404. The response from `/opc/v2/host` only has a building, a host and a rack ID (shortened here), with no network block or island:
-
-```
-## /opc/v2/host/rdmaTopologyData
-wget: server returned error: HTTP/1.1 404 Not Found
-## /opc/v2/host
-{
-  "buildingId": "building:81c65ff2...",
-  "id": "2cf5737e...",
-  "rackId": "e581e64b...",
-  "virtualizationSolutionVersion": "1.20240607.1203"
-}
-```
-
-The script skips every host without `rdmaTopologyData`, and Kueue leaves unlabeled nodes out. Some RDMA shapes have a network block ID and a rack ID in the `/opc/v2/host` response instead. The script does not read those, so label such hosts another way.
-
-On these VMs, only the skip paths of the script can run. I tested the hash and label step on its own, with a made-up response in the same format.
-
-So for the test, I set the labels by hand:
+The test nodes are VMs, and `rdmaTopologyData` returns 404 on them. So for the test, I set the labels by hand:
 
 {{< code language="bash" title="label-simulated.sh" open="false" >}}
 #!/usr/bin/env bash
@@ -175,27 +90,7 @@ done
 ./label-simulated.sh oke.oraclecloud.com/pool.name=oke-cpu
 ```
 
-A second run of the IMDS script, now over all nodes, keeps these labels and skips the three system nodes:
-
-```bash
-./label-from-imds.sh
-```
-
-```
-10.140.65.205: already labeled, skipped
-10.140.68.178: already labeled, skipped
-10.140.71.229: already labeled, skipped
-10.140.75.175: already labeled, skipped
-10.140.75.55: no RDMA topology in IMDS, skipped
-10.140.77.31: already labeled, skipped
-10.140.84.34: already labeled, skipped
-10.140.87.64: no RDMA topology in IMDS, skipped
-10.140.88.205: already labeled, skipped
-10.140.88.228: no RDMA topology in IMDS, skipped
-10.140.94.172: already labeled, skipped
-```
-
-Labels do not survive a node replacement. A new node starts without topology labels, and Kueue leaves it out until you label it. On a real cluster, run the labeling script again after every scale-up or node replacement.
+Labels do not survive a node replacement. A new node starts without topology labels, and Kueue leaves it out until you label it. On a real cluster, label the nodes again after every scale-up or node replacement.
 
 ## Fake GPUs
 
