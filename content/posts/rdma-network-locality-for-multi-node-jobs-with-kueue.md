@@ -42,7 +42,7 @@ Kueue models the topology as levels, from the widest to a single node. Each leve
 
 ## Where the topology comes from
 
-On bare metal GPU hosts, the instance metadata service (IMDS) returns the place of the host in the RDMA network at `/opc/v2/host/rdmaTopologyData`. The document is there when the availability domain has a dedicated capacity pool and a capacity topology. Then it has four OCIDs (shortened here):
+On bare metal GPU hosts, the instance metadata service (IMDS) returns the place of the host in the RDMA network at `/opc/v2/host/rdmaTopologyData`. This endpoint returns data only when the availability domain has a dedicated pool. Then the response has four OCIDs (shortened here):
 
 ```json
 {
