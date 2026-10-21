@@ -42,7 +42,7 @@ Kueue models the topology as levels, from the widest to a single node. Each leve
 
 ## Where the topology comes from
 
-On bare metal GPU hosts, the instance metadata service (IMDS) returns the place of the host in the RDMA network at `/opc/v2/host/rdmaTopologyData`. OCI's public IMDS documentation does not list this path. NVIDIA documents it for [Topograph's OCI provider](https://docs.nvidia.com/topograph/providers/oci/), which reads it the same way. The document is there on bare metal GPU hosts when the availability domain has a dedicated capacity pool and a capacity topology. Then it has four OCIDs (shortened here):
+On bare metal GPU hosts, the instance metadata service (IMDS) returns the place of the host in the RDMA network at `/opc/v2/host/rdmaTopologyData`. NVIDIA documents it for [Topograph's OCI provider](https://docs.nvidia.com/topograph/providers/oci/), which reads it the same way. The document is there on bare metal GPU hosts when the availability domain has a dedicated capacity pool and a capacity topology. Then it has four OCIDs (shortened here):
 
 ```json
 {
