@@ -149,8 +149,8 @@ spec:
     flavors:
     - name: gpu-rdma
       resources:
-      - { name: cpu, nominalQuota: 1024 }
-      - { name: memory, nominalQuota: 16Ti }
+      - { name: cpu, nominalQuota: 1000 }
+      - { name: memory, nominalQuota: 8000Gi }
       - { name: nvidia.com/gpu, nominalQuota: 64 }
 {{< /code >}}
 
@@ -646,8 +646,8 @@ spec:
     flavors:
     - name: gpu-rdma
       resources:
-      - { name: cpu, nominalQuota: 1024 }
-      - { name: memory, nominalQuota: 16Ti }
+      - { name: cpu, nominalQuota: 1000 }
+      - { name: memory, nominalQuota: 8000Gi }
       - { name: nvidia.com/gpu, nominalQuota: 64 }
     - name: system
       resources:
@@ -1069,8 +1069,8 @@ spec:
     flavors:
     - name: gpu-rdma
       resources:
-      - { name: cpu, nominalQuota: 1024 }
-      - { name: memory, nominalQuota: 16Ti }
+      - { name: cpu, nominalQuota: 1000 }
+      - { name: memory, nominalQuota: 8000Gi }
       - { name: nvidia.com/gpu, nominalQuota: 64 }
     - name: system
       resources:
