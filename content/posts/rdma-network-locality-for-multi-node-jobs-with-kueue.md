@@ -16,13 +16,13 @@ The write-up calls the first tier Tier-0. The diagram below calls the other two 
 
 In the OCI API, the groups of hosts under these tiers are a local block, a network block and an HPC island ([`ComputeBareMetalHost`](https://docs.oracle.com/en-us/iaas/tools/python/latest/api/core/models/oci.core.models.ComputeBareMetalHost.html)).
 
-OCI also has a two-tier network. [Oracle Acceleron's multiplanar network](https://blogs.oracle.com/cloud-infrastructure/first-principles-acceleron-multiplanar-networking) is made of several independent planes, and each plane is its own Clos fabric. Each NIC connects to one switch in each plane, and most deployments have two tiers of switches instead of three. This post uses the three-tier network, but the same logic applies to both. Pods under the same switches talk with less latency than pods whose traffic crosses more tiers. So you describe the tiers of your network as levels of a Topology, and Kueue places the pods the same way.
+OCI also has a two-tier network. [Oracle Acceleron's multiplanar network](https://blogs.oracle.com/cloud-infrastructure/first-principles-acceleron-multiplanar-networking) is made of several independent planes, and each plane is its own Clos fabric. Each NIC connects to one switch in each plane, and most deployments have two tiers of switches instead of three. In this post I use the three-tier network, but the same logic applies to both. Pods under the same switches talk with less latency than pods whose traffic crosses more tiers. So you describe the tiers of your network as levels of a Topology, and Kueue places the pods the same way.
 
 The default Kubernetes scheduler knows none of this. It places each pod on its own, wherever the pod fits. A 4-node job can end up with two pods in one local block and two in another network block, and nothing tells you.
 
 Kueue's topology-aware scheduling (TAS) fixes that. You describe the topology once. Kueue then places all the pods of a job as close together as it can. Or it keeps the job waiting until they fit where you require.
 
-This is going to be a long post, so bear with me. It starts from a cluster without Kueue. I label the nodes, install Kueue, create the four Kueue objects, and run thirteen experiments. They show how Kueue decides and what it does after a job starts. Every manifest and command in the post ran as written. Long files are collapsed, so click a file name to open it.
+This is going to be a long post, so bear with me. I start from a cluster without Kueue, then label the nodes, install Kueue, create the four Kueue objects, and run thirteen experiments. They show how Kueue decides and what it does after a job starts. Long files are collapsed, so click a file name to open it.
 
 ## The test cluster
 
@@ -55,7 +55,7 @@ On bare metal GPU hosts, the instance metadata service (IMDS) returns the place 
 
 Kubernetes does not read IMDS, so the labels are yours to set. We have a [labeler](https://github.com/oracle-quickstart/oci-hpc-oke/blob/main/docs/oci-hpc-oke-utils.md#labeler) that sets them. An OCID is longer than the 63 characters that a label value allows, so use a short form of each one, such as a hash. The value only has to be the same on all hosts in one block.
 
-For easier reading, this post uses short names such as `isl-1`, `nb-a` and `lb-a1` instead. This script sets them:
+For easier reading, I use short names such as `isl-1`, `nb-a` and `lb-a1` instead. This script sets them:
 
 {{< code language="bash" title="label-topology.sh" open="false" >}}
 #!/usr/bin/env bash
@@ -639,7 +639,7 @@ POD                              NODE           NETWORK_BLOCK  LOCAL_BLOCK
 with-request-x27fg               10.140.65.205  nb-a           lb-a1
 ```
 
-It was admitted with TAS, but it landed on one of the GPU nodes.
+The `with-request` job was admitted with TAS, but it landed on one of the GPU nodes.
 
 The second fix is a flavor without a topology for everything that does not need one. Here it is the system node pool, added to the same ClusterQueue with its own small quota:
 
