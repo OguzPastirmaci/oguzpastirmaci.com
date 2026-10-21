@@ -25,3 +25,20 @@ pagination.pagerSize = 5
 # From Hugo's GitHub Pages guide.
 [caches.images]
   dir = ":cacheDir/images"
+
+# Header links, opened in a new tab.
+[[menu.main]]
+  identifier = "linkedin"
+  name = "LinkedIn"
+  url = "https://www.linkedin.com/in/oguzpastirmaci/"
+  weight = 1
+  [menu.main.params]
+    newTab = true
+
+[[menu.main]]
+  identifier = "github"
+  name = "GitHub"
+  url = "https://github.com/OguzPastirmaci"
+  weight = 2
+  [menu.main.params]
+    newTab = true
