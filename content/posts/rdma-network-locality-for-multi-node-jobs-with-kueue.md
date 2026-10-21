@@ -92,47 +92,6 @@ done
 
 Labels do not survive a node replacement. A new node starts without topology labels, and Kueue leaves it out until you label it. On a real cluster, label the nodes again after every scale-up or node replacement.
 
-## Fake GPUs
-
-Each test node also needs `nvidia.com/gpu` capacity. I added 8 per node with the method from the [Kubernetes documentation for extended resources](https://kubernetes.io/docs/tasks/administer-cluster/extended-resource-node/), a patch to the status of the node:
-
-{{< code language="bash" title="fake-gpus.sh" open="false" >}}
-#!/usr/bin/env bash
-# Advertise 8 fake nvidia.com/gpu on each selected node, so CPU nodes can stand in for GPU nodes.
-# Usage: fake-gpus.sh <node label selector>
-set -euo pipefail
-
-selector=$1
-for node in $(kubectl get nodes -l "$selector" -o jsonpath='{.items[*].metadata.name}'); do
-  kubectl patch node "$node" --subresource=status --type=json \
-    -p '[{"op": "add", "path": "/status/capacity/nvidia.com~1gpu", "value": "8"}]'
-done
-{{< /code >}}
-
-```bash
-./fake-gpus.sh oke.oraclecloud.com/pool.name=oke-cpu
-```
-
-OKE's NVIDIA device plugin DaemonSet only runs on GPU shapes or on nodes with the label `nvidia.com/gpu=true`. It had 0 pods on this cluster, so nothing reset the fake count. Do not do this on a cluster with real GPUs.
-
-After both scripts:
-
-```bash
-kubectl get nodes -l oke.oraclecloud.com/pool.name=oke-cpu -o custom-columns='NAME:.metadata.name,NETWORK_BLOCK:.metadata.labels.oci\.oraclecloud\.com/rdma\.network_block_id,LOCAL_BLOCK:.metadata.labels.oci\.oraclecloud\.com/rdma\.local_block_id,HOST:.metadata.labels.oci\.oraclecloud\.com/rdma\.host_id,GPU_CAP:.status.capacity.nvidia\.com/gpu,GPU_ALLOC:.status.allocatable.nvidia\.com/gpu'
-```
-
-```
-NAME            NETWORK_BLOCK   LOCAL_BLOCK   HOST     GPU_CAP   GPU_ALLOC
-10.140.65.205   nb-a            lb-a1         host-1   8         8
-10.140.68.178   nb-a            lb-a1         host-2   8         8
-10.140.71.229   nb-a            lb-a2         host-3   8         8
-10.140.75.175   nb-a            lb-a2         host-4   8         8
-10.140.77.31    nb-b            lb-b1         host-5   8         8
-10.140.84.34    nb-b            lb-b1         host-6   8         8
-10.140.88.205   nb-b            lb-b2         host-7   8         8
-10.140.94.172   nb-b            lb-b2         host-8   8         8
-```
-
 ## Installing Kueue
 
 ```bash
