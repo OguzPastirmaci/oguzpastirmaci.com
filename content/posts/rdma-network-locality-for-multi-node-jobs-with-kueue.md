@@ -122,7 +122,7 @@ The test nodes are VMs, so there is no RDMA topology, and the script says so:
 10.140.94.172: no RDMA topology in IMDS, skipped
 ```
 
-From a pod on one of these VMs, `rdmaTopologyData` returns 404. The `/opc/v2/host` document exists, but it only has a building, a host and a rack ID (shortened here), with no network block or island:
+From a pod on one of these VMs, `rdmaTopologyData` returns 404. The response from `/opc/v2/host` only has a building, a host and a rack ID (shortened here), with no network block or island:
 
 ```
 ## /opc/v2/host/rdmaTopologyData
@@ -136,9 +136,9 @@ wget: server returned error: HTTP/1.1 404 Not Found
 }
 ```
 
-The script skips every host without `rdmaTopologyData`, and Kueue leaves unlabeled nodes out. Some RDMA shapes have a network block ID and a rack ID in the `/opc/v2/host` document instead. The script does not read those, so label such hosts another way.
+The script skips every host without `rdmaTopologyData`, and Kueue leaves unlabeled nodes out. Some RDMA shapes have a network block ID and a rack ID in the `/opc/v2/host` response instead. The script does not read those, so label such hosts another way.
 
-On these VMs, only the skip paths of the script can run. I tested the hash and label step on its own, with a made-up document in the same format.
+On these VMs, only the skip paths of the script can run. I tested the hash and label step on its own, with a made-up response in the same format.
 
 So for the test, I set the labels by hand:
 
