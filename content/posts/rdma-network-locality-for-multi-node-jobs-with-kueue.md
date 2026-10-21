@@ -53,7 +53,7 @@ On bare metal GPU hosts, the instance metadata service (IMDS) returns the place 
 }
 ```
 
-Kubernetes does not read IMDS, so the labels are yours to set. An OCID is longer than the 63 characters that a label value allows, so use a short form of each one, such as a hash. The value only has to be the same on all hosts in one block.
+Kubernetes does not read IMDS, so the labels are yours to set. We have a [labeler](https://github.com/oracle-quickstart/oci-hpc-oke/blob/main/docs/oci-hpc-oke-utils.md#labeler) that sets them. An OCID is longer than the 63 characters that a label value allows, so use a short form of each one, such as a hash. The value only has to be the same on all hosts in one block.
 
 For easier reading, this post uses short names such as `isl-1`, `nb-a` and `lb-a1` instead. This script sets them:
 
