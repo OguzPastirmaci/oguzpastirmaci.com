@@ -16,9 +16,9 @@ Every manifest and command in this post ran on the two nodes. Long files are col
 
 ## The setup
 
-- 2 x BM.GPU4.8 in one HPC island, OKE v1.36.4
+- 2 x BM.GPU4.8, OKE v1.36.4
 - `nvcr.io/nvidia/pytorch:26.09-py3` (PyTorch 2.14.0a0, NCCL 2.31.2)
-- Volcano v1.16.0, Kubeflow Training Operator v1.9.4 and Kubeflow Trainer v2.3.0 as launchers, Kueue 0.20.0 for one run
+- Volcano v1.16.0, Kubeflow Training Operator v1.9.4 and Kubeflow Trainer v2.3.0 as launchers
 - A DDP script on all 16 GPUs that times an 8 GiB `all_reduce` and then trains a toy model for 200 steps
 
 Every worker pod in this post has the same RDMA settings:
@@ -28,19 +28,6 @@ Every worker pod in this post has the same RDMA settings:
 - A `hostPath` mount of `/dev/infiniband`, the RDMA device files that NCCL opens.
 - A memory-backed `emptyDir` on `/dev/shm`. NCCL uses shared memory between the processes on one node, and the default `/dev/shm` of a container is 64 MiB.
 - `privileged: true` with the `IPC_LOCK` and `SYS_ADMIN` capabilities. `IPC_LOCK` lets NCCL lock the memory that it registers with the NICs.
-
-And the same NCCL settings:
-
-| Variable | Value | What it does |
-| --- | --- | --- |
-| `NCCL_IB_HCA` | `=mlx5_0,mlx5_2,...,mlx5_17` | The 16 RDMA ports. The `=` prefix makes NCCL match the names exactly. |
-| `NCCL_IB_GID_INDEX` | `3` | The Global ID index used in RoCE mode. |
-| `NCCL_IB_TC` | `41` | The InfiniBand traffic class field. |
-| `NCCL_IB_SL` | `0` | The InfiniBand service level. |
-| `NCCL_IB_TIMEOUT` | `22` | The verbs timeout, 4.096 µs × 2^22, about 17 seconds. |
-| `NCCL_IB_QPS_PER_CONNECTION` | `4` | Queue pairs for each connection between two ranks. |
-| `NCCL_IB_SPLIT_DATA_ON_QPS` | `0` | Messages go round-robin over the queue pairs instead of being split across them. |
-| `NCCL_DEBUG`, `NCCL_DEBUG_SUBSYS` | `INFO`, `INIT,NET` | The log lines used to check the transport below. |
 
 The training script goes into a ConfigMap, and every job mounts it on `/scripts`:
 
@@ -207,7 +194,7 @@ Without `is_host`, both nodes act as clients and wait for a store that nobody st
 torch.distributed.elastic.rendezvous.api.RendezvousConnectionError: The connection to the C10d store has failed. See inner exception for details.
 ```
 
-That one is at least honest. The error points at the rendezvous.
+At least this error points at the rendezvous.
 
 Without `--local-addr`, the rendezvous succeeds, because `is_host` is set. Node 0 starts NCCL and waits. The 8 processes on node 1 try to reach the store at the advertised address, which is the node name of node 0:
 
@@ -735,108 +722,6 @@ kubectl logs -l jobset.sigs.k8s.io/jobset-name=ddp-rdma,batch.kubernetes.io/job-
   | grep -E '^(host|world size|all_reduce|step|training finished)'
 ```
 
-### With Kueue
-
-Kueue's topology-aware scheduling can keep both pods of a job in the same HPC island, using the RDMA topology labels on the nodes. The `Topology` lists the RDMA node labels from the widest level to a single node. The `TrainJob` gets the queue label and a `podset-required-topology` annotation on the island label, so Kueue admits it only when both pods fit in one island. The `ClusterQueue` quota is the two nodes, 16 GPUs.
-
-```bash
-helm install kueue oci://registry.k8s.io/kueue/charts/kueue --version 0.20.0 \
-  --namespace kueue-system --create-namespace --wait
-kubectl get nodes -L oci.oraclecloud.com/rdma.hpc_island_id,oci.oraclecloud.com/rdma.network_block_id,oci.oraclecloud.com/rdma.local_block_id
-```
-
-{{< code language="yaml" title="kueue-rdma-topology.yaml" open="false" >}}
-apiVersion: kueue.x-k8s.io/v1beta2
-kind: Topology
-metadata:
-  name: rdma-topology
-spec:
-  levels:
-  - nodeLabel: oci.oraclecloud.com/rdma.hpc_island_id
-  - nodeLabel: oci.oraclecloud.com/rdma.network_block_id
-  - nodeLabel: oci.oraclecloud.com/rdma.local_block_id
-  - nodeLabel: kubernetes.io/hostname
----
-apiVersion: kueue.x-k8s.io/v1beta2
-kind: ResourceFlavor
-metadata:
-  name: bm-gpu4-8
-spec:
-  nodeLabels:
-    node.kubernetes.io/instance-type: BM.GPU4.8
-  topologyName: rdma-topology
-  tolerations:
-  - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
----
-apiVersion: kueue.x-k8s.io/v1beta2
-kind: ClusterQueue
-metadata:
-  name: bm-gpu4-8
-spec:
-  namespaceSelector: {}
-  resourceGroups:
-  - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
-    flavors:
-    - name: bm-gpu4-8
-      resources:
-      - { name: cpu, nominalQuota: 255 }
-      - { name: memory, nominalQuota: 3800Gi }
-      - { name: nvidia.com/gpu, nominalQuota: 16 }
----
-apiVersion: kueue.x-k8s.io/v1beta2
-kind: LocalQueue
-metadata:
-  name: bm-gpu4-8
-  namespace: default
-spec:
-  clusterQueue: bm-gpu4-8
-{{< /code >}}
-
-{{< code language="yaml" title="trainer-v2-trainjob-kueue.yaml" open="false" >}}
-apiVersion: trainer.kubeflow.org/v1alpha1
-kind: TrainJob
-metadata:
-  name: ddp-rdma-kueue
-  labels:
-    kueue.x-k8s.io/queue-name: bm-gpu4-8
-spec:
-  runtimeRef:
-    name: torch-distributed-rdma
-  trainer:
-    numNodes: 2
-    resourcesPerNode:
-      limits:
-        nvidia.com/gpu: 8
-    command: ["torchrun", "/scripts/train.py"]
-  runtimePatches:
-  - manager: example.com/ddp-rdma
-    trainingRuntimeSpec:
-      template:
-        spec:
-          replicatedJobs:
-          - name: node
-            template:
-              spec:
-                template:
-                  metadata:
-                    annotations:
-                      kueue.x-k8s.io/podset-required-topology: oci.oraclecloud.com/rdma.hpc_island_id
-                  spec:
-                    volumes:
-                    - { name: ddp-script, configMap: { name: ddp-script }}
-                    containers:
-                    - name: node
-                      volumeMounts:
-                      - { mountPath: /scripts, name: ddp-script }
-{{< /code >}}
-
-```bash
-kubectl apply -f kueue-rdma-topology.yaml
-kubectl apply -f trainer-v2-trainjob-kueue.yaml
-kubectl get workloads
-kubectl wait --for=condition=Complete trainjob/ddp-rdma-kueue --timeout=10m
-```
-
 ## One more thing that bit me
 
 Training Operator v1 brings its own `MPIJob` CRD (`kubeflow.org/v1`), which conflicts with the stand-alone MPI Operator (`v2beta1`). If Kueue was running while the MPI Operator was installed, Kueue keeps logging `Failed to watch *v2beta1.MPIJob` after you remove it.
@@ -848,7 +733,6 @@ Once the rendezvous was right, every launcher reached the same bandwidth:
 | Launcher | Bus bandwidth, `all_reduce`, 8 GiB |
 | --- | --- |
 | Kubeflow Trainer v2 | 191.0 GB/s |
-| Kubeflow Trainer v2 with Kueue | 191.1 GB/s |
 | Volcano, c10d | 191.0 GB/s |
 | Volcano, etcd | 191.0 GB/s |
 | Training Operator v1, c10d | 191.0 GB/s |
@@ -866,7 +750,7 @@ kubectl logs <pod> | grep -c 'via NET/IB/.*/GDRDMA'
 
 The first must say `Using network IB`. The second lists the devices, and it must have 16 `/RoCE` entries and no `mlx5_4` or `mlx5_5`, the front-end ports. The third counts the GPUDirect RDMA channels and must be more than 0. I did not read the per-NIC traffic counters for these runs, so this shows that NCCL selected all 16 NICs, not how evenly it spread the traffic.
 
-## What I take from this
+## Before you blame NCCL
 
 - On the host network, do not let torchrun guess. Set `is_host` and `--local-addr` yourself, or use a launcher that keeps torchrun's default `static` rendezvous and sets the master address and node rank.
 - Use PyTorch 2.5 or later. On 2.4.x, `--local-addr` is ignored.
