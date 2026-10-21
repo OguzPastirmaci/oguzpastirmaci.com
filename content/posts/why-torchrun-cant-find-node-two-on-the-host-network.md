@@ -119,22 +119,35 @@ After the rendezvous, the agent with rank 0 opens a second store on a free port.
 
 If you do not tell it, torchrun makes the first decision with [`_matches_machine_hostname()`](https://github.com/pytorch/pytorch/blob/v2.14.1/torch/distributed/elastic/rendezvous/utils.py#L117-L166), from the [`c10d` backend](https://github.com/pytorch/pytorch/blob/v2.14.1/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py#L137-L145). That function compares the endpoint with `socket.gethostname()`. Then it compares the IP addresses of the endpoint with the IP addresses that the local host name resolves to.
 
-In a host network pod, `socket.gethostname()` returns the name of the node. I checked the names from a host network pod on each node. The loop uses the Kubernetes node names from `kubectl get nodes`, which are IP addresses on OKE. Replace them with yours.
+In a host network pod, `socket.gethostname()` returns the name of the node. I checked the names from a host network pod on each node. The pods use the Kubernetes node names from `kubectl get nodes`, which are IP addresses on OKE. Replace them with yours.
 
-```bash
-for n in 10.140.68.247 10.140.88.37; do name=dnscheck-$(echo $n | tr . -); cat <<EOF | kubectl apply -f - >/dev/null
+{{< code language="yaml" title="dnscheck.yaml" open="false" >}}
 apiVersion: v1
 kind: Pod
-metadata: { name: $name }
+metadata: { name: dnscheck-10-140-68-247 }
 spec:
   hostNetwork: true
   dnsPolicy: ClusterFirstWithHostNet
-  nodeSelector: { kubernetes.io/hostname: "$n" }
+  nodeSelector: { kubernetes.io/hostname: "10.140.68.247" }
   tolerations: [{ key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }]
   containers:
   - { name: c, image: nvcr.io/nvidia/pytorch:26.09-py3, command: ["sleep", "600"], resources: { requests: { cpu: 10m, memory: 16Mi } } }
-EOF
-done
+---
+apiVersion: v1
+kind: Pod
+metadata: { name: dnscheck-10-140-88-37 }
+spec:
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  nodeSelector: { kubernetes.io/hostname: "10.140.88.37" }
+  tolerations: [{ key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }]
+  containers:
+  - { name: c, image: nvcr.io/nvidia/pytorch:26.09-py3, command: ["sleep", "600"], resources: { requests: { cpu: 10m, memory: 16Mi } } }
+{{< /code >}}
+
+```bash
+kubectl apply -f dnscheck.yaml
+
 kubectl wait --for=condition=Ready pod/dnscheck-10-140-68-247 pod/dnscheck-10-140-88-37 --timeout=120s
 ```
 
@@ -255,6 +268,7 @@ The `svc` plugin creates the headless Service and sets `VC_WORKER_HOSTS` (the DN
 
 ```bash
 WORKERS=(${VC_WORKER_HOSTS//,/ })
+
 torchrun \
   --rdzv-id=$JOB_ID \
   --rdzv-backend=c10d \
@@ -339,7 +353,9 @@ spec:
 
 ```bash
 kubectl apply -f volcano-c10d.yaml
+
 kubectl wait --for=jsonpath='{.status.state.phase}'=Completed vcjob/ddp-volcano-c10d --timeout=10m
+
 kubectl logs ddp-volcano-c10d-worker-0 | grep -E '^(host|world size|all_reduce|step|training finished)'
 ```
 
@@ -438,7 +454,9 @@ spec:
 
 ```bash
 kubectl apply -f pytorchjob-c10d.yaml
+
 kubectl wait --for=condition=Succeeded pytorchjob/ddp-pytorchjob-c10d --timeout=10m
+
 kubectl logs ddp-pytorchjob-c10d-worker-0 | grep -E '^(host|world size|all_reduce|step|training finished)'
 ```
 
@@ -486,6 +504,7 @@ spec:
 
 ```bash
 kubectl apply -f etcd.yaml
+
 kubectl wait --for=condition=Ready pod/etcd-server
 ```
 
@@ -560,7 +579,9 @@ spec:
 
 ```bash
 kubectl apply -f volcano-etcd.yaml
+
 kubectl wait --for=jsonpath='{.status.state.phase}'=Completed vcjob/ddp-volcano-etcd --timeout=10m
+
 kubectl logs ddp-volcano-etcd-worker-0 | grep -E '^(host|world size|all_reduce|step|training finished)'
 ```
 
@@ -637,7 +658,9 @@ The job uses `generateName`, so it needs `kubectl create` instead of `kubectl ap
 
 ```bash
 kubectl create -f pytorchjob-etcd.yaml
+
 kubectl wait --for=condition=Succeeded pytorchjob/<job-name> --timeout=10m
+
 kubectl logs <job-name>-worker-0 | grep -E '^(host|world size|all_reduce|step|training finished)'
 ```
 
@@ -742,8 +765,11 @@ spec:
 
 ```bash
 kubectl apply -f trainer-v2-runtime.yaml
+
 kubectl apply -f trainer-v2-trainjob.yaml
+
 kubectl wait --for=condition=Complete trainjob/ddp-rdma --timeout=20m
+
 kubectl logs -l jobset.sigs.k8s.io/jobset-name=ddp-rdma,batch.kubernetes.io/job-completion-index=0 --tail=-1 \
   | grep -E '^(host|world size|all_reduce|step|training finished)'
 ```
@@ -766,7 +792,9 @@ In every run, NCCL selected all 16 RDMA NICs in its `NET/IB` device list. It use
 
 ```bash
 kubectl logs <pod> | grep -m1 'NCCL INFO Using network'
+
 kubectl logs <pod> | grep -m1 'NET/IB : Using \[0\]'
+
 kubectl logs <pod> | grep -c 'via NET/IB/.*/GDRDMA'
 ```
 

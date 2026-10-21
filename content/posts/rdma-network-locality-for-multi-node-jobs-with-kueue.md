@@ -170,9 +170,13 @@ spec:
 
 ```bash
 kubectl apply -f topology.yaml
+
 kubectl apply -f resourceflavor.yaml
+
 kubectl apply -f clusterqueue.yaml
+
 kubectl apply -f localqueue.yaml
+
 kubectl get localqueue
 ```
 
@@ -234,7 +238,9 @@ I used these commands for Kueue's view of a job:
 
 ```bash
 kubectl get workloads
+
 kubectl get workload <name> -o jsonpath='{.status.admission.podSetAssignments[*].topologyAssignment}' | jq
+
 kubectl get workload <name> -o json | jq -r '.status.conditions[] | "\(.type)=\(.status) reason=\(.reason) message=\(.message)"'
 ```
 
@@ -267,6 +273,7 @@ spec:
 
 ```bash
 kubectl apply -f local-2.yaml
+
 ./placement.sh job-name=local-2
 ```
 
@@ -436,8 +443,11 @@ spec:
 
 ```bash
 kubectl apply -f filler.yaml
+
 kubectl apply -f block-3.yaml
+
 ./placement.sh job-name=filler
+
 ./placement.sh job-name=block-3
 ```
 
@@ -487,9 +497,13 @@ On an empty cluster, this job lands like `local-4`, with two pods in `lb-a1` and
 
 ```bash
 sed -e 's/name: filler$/name: filler-a1/' -e 's/lb-b1/lb-a1/' filler.yaml > filler-a1.yaml
+
 sed -e 's/name: filler$/name: filler-a2/' -e 's/lb-b1/lb-a2/' filler.yaml > filler-a2.yaml
+
 kubectl apply -f filler.yaml
+
 kubectl apply -f filler-a1.yaml
+
 kubectl apply -f filler-a2.yaml
 ```
 
@@ -504,6 +518,7 @@ Then I ran `local-4` again, the 4-pod job that prefers one local block:
 
 ```bash
 kubectl apply -f local-4.yaml
+
 ./placement.sh job-name=local-4
 ```
 
@@ -519,6 +534,7 @@ It ran, but pods 0 and 1 ended up in different local blocks. Then I replaced it 
 
 ```bash
 kubectl delete -f local-4.yaml
+
 kubectl apply -f slices-4.yaml
 ```
 
@@ -675,7 +691,9 @@ Then I deleted the `with-request` job and created it again. This time it got the
 
 ```bash
 kubectl delete -f with-request.yaml
+
 kubectl apply -f with-request.yaml
+
 ./placement.sh job-name=with-request
 ```
 
@@ -747,6 +765,7 @@ spec:
 
 ```bash
 kubectl apply -f jobset-4.yaml
+
 ./placement.sh jobset.sigs.k8s.io/jobset-name=train
 ```
 
@@ -823,6 +842,7 @@ A training process that gets `SIGTERM` usually exits with a non-zero code, so th
 
 ```bash
 kubectl apply -f swap-3.yaml
+
 ./placement.sh job-name=swap-3
 ```
 
@@ -837,7 +857,9 @@ Then I tainted the node of pod 1, `10.140.68.178`:
 
 ```bash
 NODE=$(kubectl get pods -l job-name=swap-3,batch.kubernetes.io/job-completion-index=1 -o jsonpath='{.items[0].spec.nodeName}')
+
 kubectl taint node "$NODE" maintenance=true:NoExecute
+
 ./placement.sh job-name=swap-3
 ```
 
@@ -852,6 +874,7 @@ Pod 1 ran again 16 seconds after the taint, on `10.140.75.175`, the free node of
 
 ```bash
 kubectl get workload <name> -o json | jq -r '.status.conditions[] | "\(.type)=\(.status) reason=\(.reason) message=\(.message)"'
+
 kubectl get job swap-3 -o jsonpath='active={.status.active} failed={.status.failed} succeeded={.status.succeeded}'
 ```
 
@@ -1007,9 +1030,13 @@ spec:
 
 ```bash
 kubectl delete -f filler-a1.yaml
+
 kubectl apply -f busy-host-1.yaml
+
 kubectl apply -f jobset-group.yaml
+
 ./placement.sh job-name=busy-host-1
+
 ./placement.sh jobset.sigs.k8s.io/jobset-name=train-group
 ```
 
@@ -1146,11 +1173,17 @@ spec:
 
 ```bash
 kubectl apply -f priorities.yaml -f clusterqueue-preemption.yaml
+
 kubectl apply -f low-a.yaml
+
 kubectl apply -f low-b.yaml
+
 kubectl wait --for=jsonpath='{.status.ready}'=4 job/low-a job/low-b --timeout=3m
+
 kubectl apply -f high-2.yaml
+
 kubectl wait --for=jsonpath='{.status.ready}'=2 job/high-2 --timeout=3m
+
 kubectl get workloads -o custom-columns='NAME:.metadata.name,PRIORITY:.spec.priority,ADMITTED:.status.conditions[?(@.type=="Admitted")].status'
 ```
 
@@ -1221,6 +1254,7 @@ With the default algorithm:
 
 ```bash
 kubectl apply -f balanced-12.yaml
+
 ./placement.sh job-name=balanced-12 | awk 'NR>1 {print $3, $4}' | sort | uniq -c
 ```
 
@@ -1240,9 +1274,12 @@ controllerManager:
 
 ```bash
 kubectl delete -f balanced-12.yaml
+
 helm upgrade kueue oci://registry.k8s.io/kueue/charts/kueue --version 0.20.2 \
   --namespace kueue-system -f kueue-balanced-values.yaml --wait
+
 kubectl apply -f balanced-12.yaml
+
 ./placement.sh job-name=balanced-12 | awk 'NR>1 {print $3, $4}' | sort | uniq -c
 ```
 
