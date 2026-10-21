@@ -1302,14 +1302,13 @@ Node affinity and pod affinity with the same labels work pod by pod. The default
 
 ## What I would do
 
-- Label the nodes from IMDS, and label them again after every scale-up or node replacement. Kueue leaves nodes without topology labels out.
+- Label the nodes from IMDS, and label them again after every scale-up or node replacement. Kueue leaves nodes without topology labels out. We have a [labeler](https://github.com/oracle-quickstart/oci-hpc-oke/blob/main/docs/oci-hpc-oke-utils.md#labeler) that does this.
 - Use `podset-preferred-topology` on the local block for most jobs. It keeps the pods close when there is room and falls back when there is not.
 - Use `podset-required-topology` only when the job is useless outside one domain. Such a job can wait forever, suspended with a condition and no pods.
 - When a job does not start, read the conditions of its Workload. Kueue says exactly what did not fit.
 - Give every pod a request, and add a flavor without a topology for launchers. In a ClusterQueue with only TAS flavors, a pod without requests never starts ([A pod with no requests](#a-pod-with-no-requests)).
 - In a mixed ClusterQueue, give every GPU pod a TAS annotation. Without one, the pod goes to the flavor without a topology, and it never fits if that flavor has no GPUs ([PodSet groups](#podset-groups)).
 - Enable every job integration that you use. The default Helm values of v0.20.2 do not enable `kubeflow.org/pytorchjob` ([`values.yaml`](https://github.com/kubernetes-sigs/kueue/blob/v0.20.2/charts/kueue/values.yaml#L171-L190)). The running config on the test cluster listed `batch/job`, `jobset.x-k8s.io/jobset`, `trainer.kubeflow.org/trainjob` and `kubeflow.org/mpijob`, but not PyTorchJob.
-- Count DaemonSet pods. Their requests reduce the free capacity of every node.
 - Use slices for groups of pods that talk to each other the most, and multi-layer slices when the job has two levels of communication.
 - Keep a spare node in each domain if you can, so node replacement has somewhere to go. This matters for required placement. With preferred placement, the replacement can land in another domain.
 - Make workers exit with a non-zero code on `SIGTERM`. In my test, node replacement only worked when the evicted pod counted as failed ([Node replacement](#node-replacement)).
