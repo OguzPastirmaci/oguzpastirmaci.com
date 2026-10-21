@@ -1,5 +1,5 @@
 +++
-title = "Keeping Multi-Node Jobs Close on the RDMA Network with Kueue"
+title = "RDMA Network Locality for Multi-Node Jobs with Kueue"
 date = "2026-10-20"
 draft = true
 tags = ["kueue", "kubernetes", "rdma", "scheduling", "oke"]
