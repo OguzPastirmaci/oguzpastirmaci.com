@@ -26,11 +26,11 @@ This post starts from a cluster without Kueue. The post labels the nodes, instal
 
 ## The test cluster
 
-I tested on an OKE cluster with eight GPU nodes. Most pods run `pause` and nothing else.
+I tested on an OKE cluster with eight nodes. Most pods run `pause` and nothing else.
 
 - OKE v1.36.4
 - kubectl v1.37.1, Helm v4.3.0 and jq 1.8.2 on my Mac
-- 8 GPU nodes in the node pool `oke-cpu`
+- 8 nodes in the node pool `oke-gpu`
 - 3 system nodes in the node pool `oke-system`
 - Kueue v0.20.2 and JobSet v0.13.0
 
@@ -57,10 +57,10 @@ Kubernetes does not read IMDS, so the labels are yours to set. An OCID is longer
 
 For easier reading, this post uses short names such as `isl-1`, `nb-a` and `lb-a1` instead. This script sets them:
 
-{{< code language="bash" title="label-simulated.sh" open="false" >}}
+{{< code language="bash" title="label-topology.sh" open="false" >}}
 #!/usr/bin/env bash
-# Give 8 nodes a made-up RDMA topology: 1 HPC island, 2 network blocks, 2 local blocks each.
-# Usage: label-simulated.sh <node label selector>
+# Label 8 nodes with short RDMA topology names: 1 HPC island, 2 network blocks, 2 local blocks each.
+# Usage: label-topology.sh <node label selector>
 set -euo pipefail
 
 selector=$1
@@ -87,10 +87,10 @@ done
 {{< /code >}}
 
 ```bash
-./label-simulated.sh oke.oraclecloud.com/pool.name=oke-cpu
+./label-topology.sh oke.oraclecloud.com/pool.name=oke-gpu
 ```
 
-Labels do not survive a node replacement. A new node starts without topology labels, and Kueue leaves it out until you label it. On a real cluster, label the nodes again after every scale-up or node replacement.
+Labels do not survive a node replacement. A new node starts without topology labels, and Kueue leaves it out until you label it. Label the nodes again after every scale-up or node replacement.
 
 ## Installing Kueue
 
@@ -127,13 +127,13 @@ metadata:
   name: gpu-rdma
 spec:
   nodeLabels:
-    oke.oraclecloud.com/pool.name: oke-cpu
+    oke.oraclecloud.com/pool.name: oke-gpu
   topologyName: oci-rdma
   tolerations:
   - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
 {{< /code >}}
 
-`nodeLabels` selects the nodes of the flavor. On a GPU cluster that would be a label such as `node.kubernetes.io/instance-type: BM.GPU.H100.8`. Here it is the CPU node pool. `topologyName` makes it a TAS flavor. A TAS flavor needs at least one entry in `nodeLabels`, and its `topologyName` cannot be changed later. Kueue adds the `nodeLabels` and `tolerations` of the flavor to every pod that it admits on this flavor.
+`nodeLabels` selects the nodes of the flavor. On a GPU cluster that would be a label such as `node.kubernetes.io/instance-type: BM.GPU.H100.8`. Here it is the node pool. `topologyName` makes it a TAS flavor. A TAS flavor needs at least one entry in `nodeLabels`, and its `topologyName` cannot be changed later. Kueue adds the `nodeLabels` and `tolerations` of the flavor to every pod that it admits on this flavor.
 
 ### ClusterQueue
 
@@ -154,7 +154,7 @@ spec:
       - { name: nvidia.com/gpu, nominalQuota: 64 }
 {{< /code >}}
 
-`coveredResources` must list every resource that the pods request. `namespaceSelector: {}` lets every namespace use the queue. Without it, no namespace can. The quota is the eight test nodes, 32 vCPUs, 128 GiB and 64 GPUs. The ResourceFlavor, the ClusterQueue and the LocalQueue all have the name `gpu-rdma`.
+`coveredResources` must list every resource that the pods request. `namespaceSelector: {}` lets every namespace use the queue. Without it, no namespace can. The GPU quota is 64, 8 for each node. The ResourceFlavor, the ClusterQueue and the LocalQueue all have the name `gpu-rdma`.
 
 ### LocalQueue
 
@@ -620,7 +620,7 @@ POD                              NODE           NETWORK_BLOCK  LOCAL_BLOCK
 with-request-x27fg               10.140.65.205  nb-a           lb-a1
 ```
 
-It was admitted with TAS, but it landed on one of the topology nodes. On a real cluster that is a GPU host.
+It was admitted with TAS, but it landed on one of the GPU nodes.
 
 The second fix is a flavor without a topology for everything that does not need one. Here it is the system node pool, added to the same ClusterQueue with its own small quota:
 
@@ -1248,7 +1248,7 @@ kubectl apply -f balanced-12.yaml
    6 nb-a lb-a2
 ```
 
-The nodes now have 4, 2, 4 and 2 pods instead of 4, 4, 4 and 0. So the two local blocks have 6 pods each. I did not measure the performance difference, because these nodes have no GPUs.
+The nodes now have 4, 2, 4 and 2 pods instead of 4, 4, 4 and 0. So the two local blocks have 6 pods each. I did not measure the performance difference.
 
 ## What Kueue writes into the job and the pods
 
@@ -1267,7 +1267,7 @@ kubectl get job local-2 -o json | jq '{suspend: .spec.suspend, gates: .spec.temp
     }
   ],
   "nodeSelector": {
-    "oke.oraclecloud.com/pool.name": "oke-cpu"
+    "oke.oraclecloud.com/pool.name": "oke-gpu"
   },
   "tolerations": [
     {
@@ -1290,8 +1290,8 @@ kubectl get pods -l job-name=local-2 -o json | jq -r '.items[] | "\(.metadata.na
 ```
 
 ```
-local-2-0-l4x46 nodeSelector={"kubernetes.io/hostname":"10.140.65.205","oke.oraclecloud.com/pool.name":"oke-cpu"} gates=[]
-local-2-1-kstl9 nodeSelector={"kubernetes.io/hostname":"10.140.68.178","oke.oraclecloud.com/pool.name":"oke-cpu"} gates=[]
+local-2-0-l4x46 nodeSelector={"kubernetes.io/hostname":"10.140.65.205","oke.oraclecloud.com/pool.name":"oke-gpu"} gates=[]
+local-2-1-kstl9 nodeSelector={"kubernetes.io/hostname":"10.140.68.178","oke.oraclecloud.com/pool.name":"oke-gpu"} gates=[]
 ```
 
 The default scheduler still binds the pods, but each pod can only go to one node.
