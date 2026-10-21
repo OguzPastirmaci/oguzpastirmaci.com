@@ -12,7 +12,7 @@ The default Kubernetes scheduler knows none of this. It places each pod on its o
 
 Kueue's topology-aware scheduling (TAS) fixes that. You describe the topology once. Kueue then places all the pods of a job as close together as it can, or keeps the job waiting until they fit where you require.
 
-This post starts from a cluster with nothing installed. It labels the nodes, installs Kueue, creates the four Kueue objects, and runs eight experiments that show how Kueue decides. Every manifest and command in the post ran as written. Long files are collapsed, so click a file name to open it.
+This post starts from a cluster with nothing installed. It labels the nodes, installs Kueue, creates the four Kueue objects, and runs thirteen experiments that show how Kueue decides and what it does after a job starts. Every manifest and command in the post ran as written. Long files are collapsed, so click a file name to open it.
 
 ## The test cluster
 
@@ -838,6 +838,443 @@ Each replicated job of the JobSet is a pod set of its own in the Workload:
 
 The launcher got the `system` flavor and runs on a system node. The four workers got the TAS flavor and run in one network block. This is the layout I want for a training job.
 
+## More TAS features
+
+The first eight experiments cover where a job starts. The next five cover what happens after that, and a newer placement algorithm. Experiments 9 to 12 use features that are on by default in v0.20.2. Experiment 13 needs an alpha feature gate.
+
+[![Where Kueue placed the pods in experiments 9 to 13](/images/tas-advanced.png)](/images/tas-advanced.png)
+
+### 9. Node replacement
+
+If a node under a running TAS job fails, Kueue can swap in a free node from the same domain, without evicting the job and without changing the rest of the assignment. The feature is called hot swap. `TASFailedNodeReplacement` is beta and on since v0.14, and `TASReplaceNodeOnNodeTaints` (beta since v0.17) also treats a `NoExecute` taint as a failure ([`kube_features.go`](https://github.com/kubernetes-sigs/kueue/blob/v0.20.2/pkg/features/kube_features.go#L994-L997), [docs](https://github.com/kubernetes-sigs/kueue/blob/v0.20.2/site/content/en/docs/concepts/topology_aware_scheduling.md#L162-L182)). It needs the host name as the last level of the Topology, a free node in the same domain, and only one failed node at a time. With more failures, Kueue evicts the workload.
+
+{{< code language="yaml" title="swap-3.yaml" open="false" >}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: swap-3
+  labels:
+    kueue.x-k8s.io/queue-name: gpu-rdma
+spec:
+  parallelism: 3
+  completions: 3
+  completionMode: Indexed
+  template:
+    metadata:
+      annotations:
+        kueue.x-k8s.io/podset-required-topology: oci.oraclecloud.com/rdma.network_block_id
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: worker
+        image: busybox:1.37
+        # Exit with 143 on SIGTERM, like a training process, so an evicted pod counts as failed.
+        command: ["sh", "-c", "trap 'exit 143' TERM; while true; do sleep 1; done"]
+        resources:
+          requests: { cpu: 100m, memory: 64Mi }
+          limits: { nvidia.com/gpu: 8 }
+{{< /code >}}
+
+The workers run a shell loop instead of `pause`. My first try used `pause`, which exits with 0 on `SIGTERM`. The evicted pod then counted as succeeded, so the Job had nothing to replace. Kueue still tried to swap the node, but with the count of the pod set lowered to 2, and the Workload webhook rejected that every 30 seconds (shortened):
+
+```
+admission webhook "vworkload.kb.io" denied the request: status.admission: Invalid value: {..."count":2,...,"roots":["65.205","71.229","75.175"]...}: field is immutable
+```
+
+A training process that gets `SIGTERM` usually exits with a non-zero code, so the shell loop exits with 143, as a killed process would.
+
+```bash
+kubectl apply -f swap-3.yaml
+./placement.sh job-name=swap-3
+```
+
+```
+POD                              NODE           NETWORK_BLOCK  LOCAL_BLOCK
+swap-3-0-9k2pm                   10.140.65.205  nb-a           lb-a1
+swap-3-1-55fqq                   10.140.68.178  nb-a           lb-a1
+swap-3-2-lbvft                   10.140.71.229  nb-a           lb-a2
+```
+
+Then I tainted the node of pod 1:
+
+```bash
+kubectl taint node 10.140.68.178 maintenance=true:NoExecute
+./placement.sh job-name=swap-3
+```
+
+```
+POD                              NODE           NETWORK_BLOCK  LOCAL_BLOCK
+swap-3-0-9k2pm                   10.140.65.205  nb-a           lb-a1
+swap-3-1-lh8xs                   10.140.75.175  nb-a           lb-a2
+swap-3-2-lbvft                   10.140.71.229  nb-a           lb-a2
+```
+
+Pod 1 ran again 16 seconds after the taint, on `10.140.75.175`, the free node of `nb-a`. The assignment in the Workload changed from `65.205, 68.178, 71.229` to `65.205, 71.229, 75.175`, and the Workload was never evicted:
+
+```
+QuotaReserved=True reason=QuotaReserved message=Quota reserved in ClusterQueue gpu-rdma
+Admitted=True reason=Admitted message=The workload is admitted
+PodsReady=True reason=Recovered message=All pods reached readiness and the workload is running
+job: active=3 failed=1 succeeded=
+```
+
+```bash
+kubectl taint node 10.140.68.178 maintenance=true:NoExecute-
+```
+
+A job that fills its whole domain cannot get a replacement inside it. If you use required placement for a large job, keep a spare node in the domain, or expect an eviction.
+
+### 10. Multi-layer slices
+
+Slices can have up to three layers, from the widest to the narrowest, in one JSON annotation. Each inner size must divide the outer size. `TASMultiLayerTopology` is beta and on since v0.19 ([`kube_features.go`](https://github.com/kubernetes-sigs/kueue/blob/v0.20.2/pkg/features/kube_features.go#L1101-L1104), [docs](https://github.com/kubernetes-sigs/kueue/blob/v0.20.2/site/content/en/docs/concepts/topology_aware_scheduling.md#L420-L460)).
+
+{{< code language="yaml" title="layers-8.yaml" open="false" >}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: layers-8
+  labels:
+    kueue.x-k8s.io/queue-name: gpu-rdma
+spec:
+  parallelism: 8
+  completions: 8
+  completionMode: Indexed
+  template:
+    metadata:
+      annotations:
+        kueue.x-k8s.io/podset-slice-required-topology-constraints: |
+          [
+            {"topology": "oci.oraclecloud.com/rdma.network_block_id", "size": 4},
+            {"topology": "oci.oraclecloud.com/rdma.local_block_id", "size": 2}
+          ]
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: worker
+        image: registry.k8s.io/pause:3.10.2
+        resources:
+          requests: { cpu: 100m, memory: 64Mi }
+          limits: { nvidia.com/gpu: 8 }
+{{< /code >}}
+
+```
+POD                              NODE           NETWORK_BLOCK  LOCAL_BLOCK
+layers-8-0-2qmmn                 10.140.65.205  nb-a           lb-a1
+layers-8-1-mj8hq                 10.140.68.178  nb-a           lb-a1
+layers-8-2-bjjx6                 10.140.71.229  nb-a           lb-a2
+layers-8-3-fdskh                 10.140.75.175  nb-a           lb-a2
+layers-8-4-gk6tp                 10.140.77.31   nb-b           lb-b1
+layers-8-5-69lzp                 10.140.84.34   nb-b           lb-b1
+layers-8-6-kj87r                 10.140.88.205  nb-b           lb-b2
+layers-8-7-xm9sq                 10.140.94.172  nb-b           lb-b2
+```
+
+Pods 0 to 3 are in `nb-a` and pods 4 to 7 in `nb-b`, and every pair is in one local block. The pod index follows the topology, so with this layout, ranks 0 and 1 share a local block, and ranks 0 to 3 share a network block. That is the shape that tensor parallelism inside a local block and pipeline stages inside a network block need.
+
+### 11. PodSet groups
+
+In experiment 8, the launcher went to a system node. A PodSet group does the opposite. It puts two pod sets of one workload in the same domain, for example a launcher and its workers, or a leader and its workers. Both pod sets need the same `podset-group-name` and the same required or preferred topology. A group has exactly two pod sets, and one of them must have one pod ([`tas_validation.go`](https://github.com/kubernetes-sigs/kueue/blob/v0.20.2/pkg/controller/jobframework/tas_validation.go#L279-L305)).
+
+{{< code language="yaml" title="jobset-group.yaml" open="false" >}}
+apiVersion: jobset.x-k8s.io/v1alpha2
+kind: JobSet
+metadata:
+  name: train-group
+  labels:
+    kueue.x-k8s.io/queue-name: gpu-rdma
+spec:
+  replicatedJobs:
+  - name: launcher
+    replicas: 1
+    template:
+      spec:
+        template:
+          metadata:
+            annotations:
+              kueue.x-k8s.io/podset-required-topology: oci.oraclecloud.com/rdma.network_block_id
+              kueue.x-k8s.io/podset-group-name: train
+          spec:
+            restartPolicy: Never
+            containers:
+            - name: launcher
+              image: registry.k8s.io/pause:3.10.2
+              resources:
+                requests: { cpu: 100m, memory: 64Mi }
+  - name: workers
+    replicas: 1
+    template:
+      spec:
+        parallelism: 4
+        completions: 4
+        completionMode: Indexed
+        template:
+          metadata:
+            annotations:
+              kueue.x-k8s.io/podset-required-topology: oci.oraclecloud.com/rdma.network_block_id
+              kueue.x-k8s.io/podset-group-name: train
+          spec:
+            restartPolicy: Never
+            containers:
+            - name: worker
+              image: registry.k8s.io/pause:3.10.2
+              resources:
+                requests: { cpu: 100m, memory: 64Mi }
+                limits: { nvidia.com/gpu: 8 }
+{{< /code >}}
+
+To make the choice visible, I kept host 1 busy first. My first attempt used the pinned filler job from experiment 4, but in the mixed ClusterQueue from experiment 7, a GPU pod without a topology annotation no longer gets TAS, and the `system` flavor has no GPUs:
+
+```
+QuotaReserved=False reason=ExceedsMaxQuota message=couldn't assign flavors to pod set main: Flavor "gpu-rdma" supports only TopologyAwareScheduling, insufficient quota for nvidia.com/gpu in flavor system, previously considered podsets requests (0) + current podset request (8) > maximum capacity (0)
+```
+
+So the busy job also asks for TAS, at the host level:
+
+{{< code language="yaml" title="busy-host-1.yaml" open="false" >}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: busy-host-1
+  labels:
+    kueue.x-k8s.io/queue-name: gpu-rdma
+spec:
+  parallelism: 1
+  completions: 1
+  completionMode: Indexed
+  template:
+    metadata:
+      annotations:
+        kueue.x-k8s.io/podset-required-topology: kubernetes.io/hostname
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        oci.oraclecloud.com/rdma.local_block_id: lb-a1
+      containers:
+      - name: worker
+        image: registry.k8s.io/pause:3.10.2
+        resources:
+          requests: { cpu: 100m, memory: 64Mi }
+          limits: { nvidia.com/gpu: 8 }
+{{< /code >}}
+
+```
+POD                              NODE           NETWORK_BLOCK  LOCAL_BLOCK
+busy-host-1-0-qncw4              10.140.65.205  nb-a           lb-a1
+```
+
+```
+POD                              NODE           NETWORK_BLOCK  LOCAL_BLOCK
+train-group-launcher-0-0-pqq4v   10.140.77.31   nb-b           lb-b1
+train-group-workers-0-0-h7ndw    10.140.77.31   nb-b           lb-b1
+train-group-workers-0-1-4tkg9    10.140.88.205  nb-b           lb-b2
+train-group-workers-0-2-dd5l5    10.140.84.34   nb-b           lb-b1
+train-group-workers-0-3-d75fm    10.140.94.172  nb-b           lb-b2
+```
+
+`nb-a` had three free nodes, so the whole group went to `nb-b`. The launcher shares the node of worker 0. Both pod sets got the TAS flavor:
+
+```
+{"name":"launcher","count":1,"flavors":{"cpu":"gpu-rdma","memory":"gpu-rdma"},"levels":["kubernetes.io/hostname"]}
+{"name":"workers","count":4,"flavors":{"cpu":"gpu-rdma","memory":"gpu-rdma","nvidia.com/gpu":"gpu-rdma"},"levels":["kubernetes.io/hostname"]}
+```
+
+### 12. Preemption
+
+TAS works with Kueue's preemption. A high-priority job that needs a domain can evict lower-priority jobs, and Kueue computes the placement against the capacity that the eviction frees. Preemption is off by default (`withinClusterQueue: Never`, [`clusterqueue_types.go`](https://github.com/kubernetes-sigs/kueue/blob/v0.20.2/apis/kueue/v1beta2/clusterqueue_types.go#L620-L630)). It needs priorities and a ClusterQueue that allows it:
+
+{{< code language="yaml" title="priorities.yaml" open="false" >}}
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: WorkloadPriorityClass
+metadata:
+  name: low
+value: 100
+description: Jobs that can be preempted
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: WorkloadPriorityClass
+metadata:
+  name: high
+value: 1000
+description: Jobs that can preempt low priority jobs
+{{< /code >}}
+
+{{< code language="yaml" title="clusterqueue-preemption.yaml" open="false" >}}
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ClusterQueue
+metadata:
+  name: gpu-rdma
+spec:
+  namespaceSelector: {}
+  preemption:
+    withinClusterQueue: LowerPriority
+  resourceGroups:
+  - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
+    flavors:
+    - name: gpu-rdma
+      resources:
+      - { name: cpu, nominalQuota: 32 }
+      - { name: memory, nominalQuota: 128Gi }
+      - { name: nvidia.com/gpu, nominalQuota: 64 }
+    - name: system
+      resources:
+      - { name: cpu, nominalQuota: 4 }
+      - { name: memory, nominalQuota: 16Gi }
+      - { name: nvidia.com/gpu, nominalQuota: 0 }
+{{< /code >}}
+
+Two low-priority jobs fill the cluster, one network block each. They are the job from experiment 2 with a priority label and a preferred network block:
+
+{{< code language="yaml" title="low-a.yaml" open="false" >}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: low-a
+  labels:
+    kueue.x-k8s.io/queue-name: gpu-rdma
+    kueue.x-k8s.io/priority-class: low
+spec:
+  parallelism: 4
+  completions: 4
+  completionMode: Indexed
+  template:
+    metadata:
+      annotations:
+        kueue.x-k8s.io/podset-preferred-topology: oci.oraclecloud.com/rdma.network_block_id
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: worker
+        image: registry.k8s.io/pause:3.10.2
+        resources:
+          requests: { cpu: 100m, memory: 64Mi }
+          limits: { nvidia.com/gpu: 8 }
+{{< /code >}}
+
+`low-b.yaml` is the same file with the name `low-b`. Then a high-priority job that requires one local block:
+
+{{< code language="yaml" title="high-2.yaml" open="false" >}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: high-2
+  labels:
+    kueue.x-k8s.io/queue-name: gpu-rdma
+    kueue.x-k8s.io/priority-class: high
+spec:
+  parallelism: 2
+  completions: 2
+  completionMode: Indexed
+  template:
+    metadata:
+      annotations:
+        kueue.x-k8s.io/podset-required-topology: oci.oraclecloud.com/rdma.local_block_id
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: worker
+        image: registry.k8s.io/pause:3.10.2
+        resources:
+          requests: { cpu: 100m, memory: 64Mi }
+          limits: { nvidia.com/gpu: 8 }
+{{< /code >}}
+
+```bash
+kubectl apply -f priorities.yaml -f clusterqueue-preemption.yaml
+kubectl apply -f low-a.yaml
+kubectl apply -f low-b.yaml
+kubectl apply -f high-2.yaml
+kubectl get workloads -o custom-columns='NAME:.metadata.name,PRIORITY:.spec.priority,ADMITTED:.status.conditions[?(@.type=="Admitted")].status'
+```
+
+```
+NAME               PRIORITY   ADMITTED
+job-high-2-acd0b   1000       True
+job-low-a-3ff02    100        True
+job-low-b-c41c4    100        False
+```
+
+```
+POD                              NODE           NETWORK_BLOCK  LOCAL_BLOCK
+high-2-0-g9wxb                   10.140.77.31   nb-b           lb-b1
+high-2-1-vjv7p                   10.140.84.34   nb-b           lb-b1
+```
+
+The conditions of `low-b`:
+
+```
+Evicted=True reason=Preempted message=Preempted to accommodate a workload (UID: 91690fe1-ba5b-4d74-ac19-04979d8c8c9f, JobUID: 003d2bf1-bb7a-434e-9009-0e9e85ae001b) due to prioritization in the ClusterQueue; preemptor path: /gpu-rdma; preemptee path: /gpu-rdma
+Preempted=True reason=InClusterQueue message=Preempted to accommodate a workload (UID: 91690fe1-ba5b-4d74-ac19-04979d8c8c9f, JobUID: 003d2bf1-bb7a-434e-9009-0e9e85ae001b) due to prioritization in the ClusterQueue; preemptor path: /gpu-rdma; preemptee path: /gpu-rdma
+Requeued=True reason=Preempted message=Preempted to accommodate a workload (UID: 91690fe1-ba5b-4d74-ac19-04979d8c8c9f, JobUID: 003d2bf1-bb7a-434e-9009-0e9e85ae001b) due to prioritization in the ClusterQueue; preemptor path: /gpu-rdma; preemptee path: /gpu-rdma
+```
+
+Kueue evicts whole workloads, not single pods. The high-priority job needed two nodes, but all four pods of `low-b` stopped, and `low-b` went back to the queue. It waits until four nodes are free again.
+
+### 13. Balanced placement (alpha)
+
+The default best-fit algorithm fills one domain before it uses the next. That can leave a few pods alone in the last domain. In the [Kueue docs](https://github.com/kubernetes-sigs/kueue/blob/v0.20.2/site/content/en/docs/concepts/topology_aware_scheduling.md#L392-L419), 12 pods in two domains with room for 10 each are placed (10,2), while (6,6) "would be more efficient" for all-to-all communication such as Allgather, because the traffic between the domains is spread better. The feature started with [kubernetes-sigs/kueue#6554](https://github.com/kubernetes-sigs/kueue/issues/6554), where a Kueue maintainer wrote that for a 16-pod job across two racks, "the split 8:8 into racks performs better than 1:15" in their experiments.
+
+So balanced placement might give better performance for jobs with all-to-all collectives that do not fit in one domain. It is alpha and off by default ([`kube_features.go`](https://github.com/kubernetes-sigs/kueue/blob/v0.20.2/pkg/features/kube_features.go#L1034-L1036)). It only works with `podset-preferred-topology`. Kueue balances the pods over the domains one level below the preferred level, and it falls back to the default algorithm if the job does not fit in one domain one level above it. There is also an open bug where it ignores preferred node affinity ([kubernetes-sigs/kueue#15334](https://github.com/kubernetes-sigs/kueue/issues/15334)).
+
+The test job has 12 pods with 2 GPUs each, so each node fits 4 pods and each local block 8. It prefers one network block, so Kueue balances it over the two local blocks of that network block:
+
+{{< code language="yaml" title="balanced-12.yaml" open="false" >}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: balanced-12
+  labels:
+    kueue.x-k8s.io/queue-name: gpu-rdma
+spec:
+  parallelism: 12
+  completions: 12
+  completionMode: Indexed
+  template:
+    metadata:
+      annotations:
+        kueue.x-k8s.io/podset-preferred-topology: oci.oraclecloud.com/rdma.network_block_id
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: worker
+        image: registry.k8s.io/pause:3.10.2
+        resources:
+          requests: { cpu: 100m, memory: 64Mi }
+          limits: { nvidia.com/gpu: 2 }
+{{< /code >}}
+
+With the default algorithm:
+
+```bash
+kubectl apply -f balanced-12.yaml
+./placement.sh job-name=balanced-12 | awk 'NR>1 {print $3, $4}' | sort | uniq -c
+```
+
+```
+   8 nb-a lb-a1
+   4 nb-a lb-a2
+```
+
+Then I turned on the feature gate with a Helm upgrade and ran the same job again:
+
+{{< code language="yaml" title="kueue-balanced-values.yaml" open="false" >}}
+controllerManager:
+  featureGates:
+  - name: TASBalancedPlacement
+    enabled: true
+{{< /code >}}
+
+```bash
+helm upgrade kueue oci://registry.k8s.io/kueue/charts/kueue --version 0.20.2 \
+  --namespace kueue-system -f kueue-balanced-values.yaml --wait
+```
+
+```
+   6 nb-a lb-a1
+   6 nb-a lb-a2
+```
+
+The nodes now have 4, 2, 4 and 2 pods instead of 4, 4, 4 and 0, so the two local blocks have 6 pods each. I did not measure the performance difference, because these nodes have no GPUs.
+
 ## What Kueue writes into the job and the pods
 
 After it admitted the job in experiment 1, Kueue changed the pod template of the Job:
@@ -891,6 +1328,9 @@ The default scheduler still binds the pods, but each pod can only go to one node
 - **New nodes have no topology labels.** Kueue leaves them out until you label them.
 - **DaemonSet pods count.** Their requests reduce the free capacity of every node.
 - **A required topology can wait forever.** The job stays suspended with a condition and no pods. Check `kubectl get workloads`.
+- **A mixed ClusterQueue needs annotations.** With a flavor without a topology in the ClusterQueue, a GPU pod without a TAS annotation goes to that flavor, and it never fits if that flavor has no GPUs (experiment 11).
+- **Workers must fail when they are killed.** Node replacement only works if the evicted pod counts as failed. A container that exits with 0 on `SIGTERM` makes the Job count it as succeeded (experiment 9).
+- **Preemption evicts whole jobs.** A small high-priority job can stop a large low-priority job (experiment 12).
 
 ## Without Kueue
 
@@ -901,6 +1341,9 @@ Node affinity and pod affinity with the same labels work pod by pod. The default
 - Label the nodes from IMDS, and label them again after every node replacement.
 - Use `podset-preferred-topology` on the local block for most jobs. It keeps the pods close when there is room and falls back when there is not.
 - Use `podset-required-topology` only when the job is useless outside one domain, and watch for jobs that wait forever.
-- Use slices for groups of pods that talk to each other the most.
+- Use slices for groups of pods that talk to each other the most, and multi-layer slices when the job has two levels of parallelism.
+- Keep a spare node in each domain if you can, so node replacement has somewhere to go.
+- Turn on preemption with WorkloadPriorityClasses, so urgent jobs do not wait behind long ones.
+- Try balanced placement for jobs with all-to-all collectives that span domains, and measure it, because it is still alpha.
 - Give every pod a request, and add a flavor without a topology for launchers.
 - When a job does not start, read the conditions of its Workload. Kueue says exactly what did not fit.
