@@ -30,7 +30,7 @@ I tested on an OKE cluster with eight nodes. Most pods run `pause` and nothing e
 
 - OKE v1.36.4
 - kubectl v1.37.1, Helm v4.3.0 and jq 1.8.2 on my Mac
-- 8 nodes in the node pool `oke-gpu`
+- 8 nodes in the node pool `oke-rdma`
 - 3 system nodes in the node pool `oke-system`
 - Kueue v0.20.2 and JobSet v0.13.0
 
@@ -87,7 +87,7 @@ done
 {{< /code >}}
 
 ```bash
-./label-topology.sh oke.oraclecloud.com/pool.name=oke-gpu
+./label-topology.sh oke.oraclecloud.com/pool.name=oke-rdma
 ```
 
 Labels do not survive a node replacement. A new node starts without topology labels, and Kueue leaves it out until you label it. Label the nodes again after every scale-up or node replacement.
@@ -127,7 +127,7 @@ metadata:
   name: gpu-rdma
 spec:
   nodeLabels:
-    oke.oraclecloud.com/pool.name: oke-gpu
+    oke.oraclecloud.com/pool.name: oke-rdma
   topologyName: oci-rdma
   tolerations:
   - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
@@ -149,8 +149,8 @@ spec:
     flavors:
     - name: gpu-rdma
       resources:
-      - { name: cpu, nominalQuota: 32 }
-      - { name: memory, nominalQuota: 128Gi }
+      - { name: cpu, nominalQuota: 1024 }
+      - { name: memory, nominalQuota: 16Ti }
       - { name: nvidia.com/gpu, nominalQuota: 64 }
 {{< /code >}}
 
@@ -646,8 +646,8 @@ spec:
     flavors:
     - name: gpu-rdma
       resources:
-      - { name: cpu, nominalQuota: 32 }
-      - { name: memory, nominalQuota: 128Gi }
+      - { name: cpu, nominalQuota: 1024 }
+      - { name: memory, nominalQuota: 16Ti }
       - { name: nvidia.com/gpu, nominalQuota: 64 }
     - name: system
       resources:
@@ -1069,8 +1069,8 @@ spec:
     flavors:
     - name: gpu-rdma
       resources:
-      - { name: cpu, nominalQuota: 32 }
-      - { name: memory, nominalQuota: 128Gi }
+      - { name: cpu, nominalQuota: 1024 }
+      - { name: memory, nominalQuota: 16Ti }
       - { name: nvidia.com/gpu, nominalQuota: 64 }
     - name: system
       resources:
@@ -1267,7 +1267,7 @@ kubectl get job local-2 -o json | jq '{suspend: .spec.suspend, gates: .spec.temp
     }
   ],
   "nodeSelector": {
-    "oke.oraclecloud.com/pool.name": "oke-gpu"
+    "oke.oraclecloud.com/pool.name": "oke-rdma"
   },
   "tolerations": [
     {
@@ -1290,8 +1290,8 @@ kubectl get pods -l job-name=local-2 -o json | jq -r '.items[] | "\(.metadata.na
 ```
 
 ```
-local-2-0-l4x46 nodeSelector={"kubernetes.io/hostname":"10.140.65.205","oke.oraclecloud.com/pool.name":"oke-gpu"} gates=[]
-local-2-1-kstl9 nodeSelector={"kubernetes.io/hostname":"10.140.68.178","oke.oraclecloud.com/pool.name":"oke-gpu"} gates=[]
+local-2-0-l4x46 nodeSelector={"kubernetes.io/hostname":"10.140.65.205","oke.oraclecloud.com/pool.name":"oke-rdma"} gates=[]
+local-2-1-kstl9 nodeSelector={"kubernetes.io/hostname":"10.140.68.178","oke.oraclecloud.com/pool.name":"oke-rdma"} gates=[]
 ```
 
 The default scheduler still binds the pods, but each pod can only go to one node.
@@ -1300,7 +1300,7 @@ The default scheduler still binds the pods, but each pod can only go to one node
 
 Node affinity and pod affinity with the same labels work pod by pod. The default scheduler places the first pod wherever it fits, and the other pods follow it. With soft rules, the job can still spread out. With hard rules, the job can start with some pods running and the rest waiting for room in a block that is already full. Kueue looks at all the pods of the job before any of them starts.
 
-## What I would do on a real cluster
+## What I would do
 
 - Label the nodes from IMDS, and label them again after every scale-up or node replacement. Kueue leaves nodes without topology labels out.
 - Use `podset-preferred-topology` on the local block for most jobs. It keeps the pods close when there is room and falls back when there is not.
