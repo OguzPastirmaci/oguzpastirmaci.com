@@ -1,0 +1,5 @@
+{{/* The theme renders this partial after each post. It holds a short author line instead of comments. */}}
+{{ if and .IsPage (eq .Type "posts") }}
+<hr>
+<p>Written by <a href="{{ "about/" | relURL }}">Oguz Pastirmaci</a>, who works on GPU and RDMA infrastructure for Kubernetes. <a href="https://www.linkedin.com/in/oguzpastirmaci/" target="_blank" rel="noopener">LinkedIn</a> · <a href="https://github.com/OguzPastirmaci" target="_blank" rel="noopener">GitHub</a></p>
+{{ end }}

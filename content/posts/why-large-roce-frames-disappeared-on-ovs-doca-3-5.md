@@ -2,6 +2,7 @@
 title = "Why Large RoCE Frames Disappeared on OVS-DOCA 3.5"
 date = "2026-10-20"
 draft = false
+ogImage = "/images/og/why-large-roce-frames-disappeared-on-ovs-doca-3-5.png"
 tags = ["ovs", "doca", "dpdk", "rdma", "roce"]
 description = "How OVS-DOCA 3.5 kept receive buffers sized for a 1500-byte MTU, so large RoCE frames vanished. One ovs-vsctl transaction fixed it."
 +++

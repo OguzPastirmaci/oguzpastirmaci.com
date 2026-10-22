@@ -3,6 +3,7 @@ locale = "en-US"
 title = "Under the Model"
 theme = "terminal"
 pagination.pagerSize = 5
+enableRobotsTXT = true
 
 # The theme's syntax highlighting needs CSS classes.
 [markup.highlight]
@@ -10,7 +11,7 @@ pagination.pagerSize = 5
 
 [params]
   contentTypeName = "posts"
-  showMenuItems = 2
+  showMenuItems = 3
   fullWidthTheme = false
   centerTheme = true
   subtitle = "Notes on GPUs, RDMA and Kubernetes."
@@ -26,12 +27,18 @@ pagination.pagerSize = 5
 [caches.images]
   dir = ":cacheDir/images"
 
+[[menu.main]]
+  identifier = "about"
+  name = "About"
+  url = "/about/"
+  weight = 1
+
 # Header links, opened in a new tab.
 [[menu.main]]
   identifier = "linkedin"
   name = "LinkedIn"
   url = "https://www.linkedin.com/in/oguzpastirmaci/"
-  weight = 1
+  weight = 2
   [menu.main.params]
     newTab = true
 
@@ -39,6 +46,6 @@ pagination.pagerSize = 5
   identifier = "github"
   name = "GitHub"
   url = "https://github.com/OguzPastirmaci"
-  weight = 2
+  weight = 3
   [menu.main.params]
     newTab = true

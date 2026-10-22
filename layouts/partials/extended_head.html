@@ -1,6 +1,36 @@
 {{/* LinkedIn's Post Inspector reads the author from this tag. */}}
 <meta name="author" content="Oguz Pastirmaci">
 
+{{/* Structured data, so search engines and AI tools can tie the posts to their author. */}}
+{{- $person := dict
+  "@type" "Person"
+  "@id" (printf "%s#person" ("about/" | absURL))
+  "name" "Oguz Pastirmaci"
+  "url" ("about/" | absURL)
+  "worksFor" (dict "@type" "Organization" "name" "Oracle Cloud Infrastructure")
+  "sameAs" (slice "https://www.linkedin.com/in/oguzpastirmaci/" "https://github.com/OguzPastirmaci")
+  "knowsAbout" (slice "GPU clusters" "RDMA" "RoCE" "InfiniBand" "Kubernetes" "NCCL" "Kueue" "DRA networking")
+-}}
+{{- if or .IsHome (eq .RelPermalink "/about/") }}
+<script type="application/ld+json">{{ merge (dict "@context" "https://schema.org") $person | jsonify | safeJS }}</script>
+{{- else if and .IsPage (eq .Type "posts") }}
+{{- $post := dict
+  "@context" "https://schema.org"
+  "@type" "BlogPosting"
+  "headline" .Title
+  "description" .Description
+  "url" .Permalink
+  "mainEntityOfPage" .Permalink
+  "datePublished" (.Date.Format "2006-01-02T15:04:05Z07:00")
+  "dateModified" (.Lastmod.Format "2006-01-02T15:04:05Z07:00")
+  "keywords" .Params.tags
+  "image" ((.Params.ogImage | default "og-image.png") | absURL)
+  "author" $person
+  "publisher" $person
+}}
+<script type="application/ld+json">{{ $post | jsonify | safeJS }}</script>
+{{- end }}
+
 {{/* GoatCounter analytics, production builds only, so local previews are not counted. */}}
 {{ if hugo.IsProduction }}
 <script data-goatcounter="https://oguzpastirmaci.goatcounter.com/count"

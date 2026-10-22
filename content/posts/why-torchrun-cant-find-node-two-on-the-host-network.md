@@ -2,6 +2,7 @@
 title = "Why torchrun Can't Find Node Two on the Host Network"
 date = "2026-10-20"
 draft = false
+ogImage = "/images/og/why-torchrun-cant-find-node-two-on-the-host-network.png"
 tags = ["pytorch", "torchrun", "rdma", "nccl", "kubernetes", "oke"]
 description = "Why torchrun loses track of itself when Kubernetes pods use the host network for RDMA, two related PyTorch issues open since 2022, and what fixed it on two A100 nodes."
 +++
