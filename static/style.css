@@ -4,3 +4,21 @@ pre code {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* A wide table scrolls inside its wrapper (layouts/_markup/render-table.html). */
+.table-wrap {
+  overflow-x: auto;
+  margin: 25px 0;
+}
+
+.table-wrap table {
+  margin: 0;
+}
+
+/* The theme lets words break anywhere. In tables that split names like arp_ignore. */
+th,
+td,
+th *,
+td * {
+  word-break: normal;
+}
