@@ -116,26 +116,7 @@ NVIDIA's public DOCA repository has the OVS source for both versions, in the `op
 - [3.3.0040-1.2601100.2601100.0622](https://linux.mellanox.com/public/repo/doca/3.3.0-088821/ubuntu24.04/arm64-sbsa/pool/openvswitch-source_3.3.0040-1.2601100.2601100.0622_all.deb) in DOCA 3.3.0 (the 3.3.0-088821 build)
 - [3.5.0052-1](https://linux.mellanox.com/public/repo/doca/3.5.0/ubuntu24.04/arm64-sbsa/pool/openvswitch-source_3.5.0052-1_all.deb) in DOCA 3.5.0
 
-The code is in `lib/netdev-doca.c`. Before it creates a pool, `dpdk_mp_get()` looks for one to reuse. In 3.3.0040, it compares the socket, the eswitch and the MTU (lines 870 to 874):
-
-```c
-        LIST_FOR_EACH (dmp, list_node, &dpdk_mp_list) {
-            if (dmp->socket_id == dev->requested_socket_id
-                && dmp->esw_mgr_port_id == dev->esw_mgr_port_id
-                && dmp->mtu == mtu) {
-                VLOG_DBG("Reusing mempool \"%s\"", dmp->mp->name);
-```
-
-In 3.5.0052, the MTU is gone (lines 816 to 819):
-
-```c
-    LIST_FOR_EACH (dmp, list_node, &dpdk_mp_list) {
-        if (dmp->socket_id == dev->requested_socket_id
-            && dmp->esw_mgr_port_id == dev->esw_mgr_port_id) {
-            VLOG_DBG("Reusing mempool \"%s\"", dmp->mp->name);
-```
-
-`struct dpdk_mp` no longer has an `mtu` field at all.
+The code is in `lib/netdev-doca.c`. Before it creates a pool, `dpdk_mp_get()` looks for one to reuse. In 3.3.0040, it reuses a pool only if the socket, eswitch and MTU all match (lines 870 to 874). In 3.5.0052, the MTU check is gone. Any pool with the same socket and eswitch is reused (lines 816 to 819). `struct dpdk_mp` no longer has an `mtu` field at all.
 
 I also checked [3.4.0040-1.2604086](https://linux.mellanox.com/public/repo/doca/3.4.0/ubuntu24.04/arm64-sbsa/pool/openvswitch-source_3.4.0040-1.2604086_all.deb) from DOCA 3.4.0. It already has the 3.5 version of this loop. I did not have 3.4 hosts, so I know this only from the source.
 
