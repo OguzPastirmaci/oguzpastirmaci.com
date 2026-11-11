@@ -3,7 +3,6 @@ title = "Inside Dranet: From Host NIC to Pod"
 date = "2026-11-10"
 draft = false
 ogImage = "/images/og/inside-dranet-from-host-nic-to-pod.png"
-aliases = ["/posts/how-dranet-works-step-by-step/"]
 tags = ["dranet", "kubernetes", "dra", "rdma", "oke"]
 description = "An interactive walkthrough of how Dranet finds a network device, gives it to a pod, and takes it back, with links to the code of each release."
 +++
