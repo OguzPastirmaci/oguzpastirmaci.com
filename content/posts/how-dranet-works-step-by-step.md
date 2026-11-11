@@ -7,7 +7,7 @@ tags = ["dranet", "kubernetes", "dra", "rdma", "oke"]
 description = "An interactive walkthrough of how Dranet finds a network device, gives it to a pod, and takes it back, with links to the code of each release."
 +++
 
-[Dranet](https://github.com/kubernetes-sigs/dranet) is a Kubernetes network driver. It gives pods real network devices, such as NICs, SR-IOV VFs and RDMA devices, through Dynamic Resource Allocation (DRA). I use it to give RDMA NICs to GPU pods on OKE. I am a reviewer for the Dranet repository and one of the owners of its OKE cloud provider.
+[Dranet](https://github.com/kubernetes-sigs/dranet) is a Kubernetes network driver. It gives pods real network devices, such as NICs, SR-IOV VFs and RDMA devices, through Dynamic Resource Allocation (DRA). We use it to give RDMA NICs to GPU pods on OKE. Dranet 1.5.0 supports OKE nodes with an IPv4 RDMA network, and we are actively working on IPv6 support. I am a reviewer for the Dranet repository and one of the owners of its OKE cloud provider.
 
 Several components take part in the flow, and each one acts at a different time. So I made a page that shows the flow one step at a time. It helped me understand and visualize the flow when I contributed to Dranet.
 
