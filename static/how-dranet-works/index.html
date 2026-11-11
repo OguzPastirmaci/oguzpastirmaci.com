@@ -1047,6 +1047,7 @@ footer { border-top: 3px dotted var(--line-strong); }
       who: "kernel → Inventory → Publisher → kube-apiserver → kube-scheduler",
       titleOke: "The NIC is free for the next claim",
       whoOke: "kube-apiserver → kube-scheduler",
+      codeOke: [],
       leadOke: "Nothing returns to the host, because <code>rdma0</code> never left it. When Kubernetes releases the allocation, the scheduler can give the NIC to the next Pod.",
       mapOke: { nodes: ["api", "sched"], edges: ["sched-api"], tags: ["ResourceClaim", "ResourceSlice"] },
       lead: "The link event from the returned interface, or the explicit rescan, wakes the inventory. The next scan finds the interface with its netdev attributes, and the publisher writes a new ResourceSlice.",
@@ -1259,7 +1260,9 @@ footer { border-top: 3px dotted var(--line-strong); }
     var cb = el("div", { "class": "block" });
     cb.appendChild(el("h4", null, "Code"));
     var refs = el("ul", { "class": "refs" });
-    s.code.forEach(function (r) {
+    var code = (scn === "oke" && s.codeOke) || s.code;
+    if (!code.length) refs.appendChild(el("li", null, "No dranet code runs in this step."));
+    code.forEach(function (r) {
       var li = el("li");
       li.appendChild(el("span", { "class": "fn" }, r[0]));
       var a = el("a", { href: GH + r[1] + "#L" + r[2], target: "_blank", rel: "noopener" }, r[1] + ":" + r[2]);
@@ -1313,6 +1316,9 @@ footer { border-top: 3px dotted var(--line-strong); }
     document.querySelectorAll(".dot").forEach(function (d) {
       var i = Number(d.getAttribute("data-i"));
       if (i === cur) d.setAttribute("aria-current", "step"); else d.removeAttribute("aria-current");
+      var dt = (scn === "oke" && STEPS[i].titleOke) || STEPS[i].title;
+      d.title = (i + 1) + ". " + dt;
+      d.setAttribute("aria-label", "Step " + (i + 1) + ": " + dt);
       d.classList.toggle("seen", !!seen[i] && i !== cur);
     });
     document.querySelectorAll(".phase").forEach(function (p) {
