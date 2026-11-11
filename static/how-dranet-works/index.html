@@ -1,0 +1,1267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="A step-by-step walkthrough of how dranet discovers, allocates, attaches, and releases network devices on Kubernetes, with links to the code of each release.">
+<meta name="author" content="Oguz Pastirmaci">
+<link rel="canonical" href="https://oguzpastirmaci.com/how-dranet-works/">
+<link rel="icon" href="/favicon.png">
+<meta property="og:type" content="article">
+<meta property="og:title" content="How dranet works">
+<meta property="og:description" content="A step-by-step walkthrough of how dranet discovers, allocates, attaches, and releases network devices on Kubernetes, with links to the code of each release.">
+<meta property="og:url" content="https://oguzpastirmaci.com/how-dranet-works/">
+<meta property="og:image" content="https://oguzpastirmaci.com/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<title>How dranet works | Under the Model</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #EDF0F4;
+  --surface: #FFFFFF;
+  --surface-2: #F4F6F9;
+  --ink: #121B28;
+  --ink-2: #364255;
+  --muted: #637084;
+  --line: #D4DBE4;
+  --line-strong: #A6B2C2;
+  --accent: #B0502A;
+  --accent-ink: #8E3D1C;
+  --accent-soft: #F7E6DC;
+  --on-accent: #FFFFFF;
+  --ready: #1D7A4C;
+  --ready-soft: #DDF0E5;
+  --band-cp: #E2E8F0;
+  --band-node: #F5F7FA;
+  --band-dranet: #FBF1EA;
+  --code-bg: #F1F3F7;
+  --shadow: 0 1px 2px rgba(18, 27, 40, .06), 0 10px 28px rgba(18, 27, 40, .06);
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-cond: "IBM Plex Sans Condensed", "Arial Narrow", "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0E131A;
+    --surface: #161D27;
+    --surface-2: #1C2531;
+    --ink: #E5EAF1;
+    --ink-2: #B9C3D0;
+    --muted: #8894A6;
+    --line: #2A3444;
+    --line-strong: #46546A;
+    --accent: #E38A5E;
+    --accent-ink: #F2A883;
+    --accent-soft: #3A2419;
+    --on-accent: #1A0F09;
+    --ready: #52C48D;
+    --ready-soft: #15301F;
+    --band-cp: #151D28;
+    --band-node: #121922;
+    --band-dranet: #211A15;
+    --code-bg: #1B2330;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 28px rgba(0, 0, 0, .28);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0E131A;
+  --surface: #161D27;
+  --surface-2: #1C2531;
+  --ink: #E5EAF1;
+  --ink-2: #B9C3D0;
+  --muted: #8894A6;
+  --line: #2A3444;
+  --line-strong: #46546A;
+  --accent: #E38A5E;
+  --accent-ink: #F2A883;
+  --accent-soft: #3A2419;
+  --on-accent: #1A0F09;
+  --ready: #52C48D;
+  --ready-soft: #15301F;
+  --band-cp: #151D28;
+  --band-node: #121922;
+  --band-dranet: #211A15;
+  --code-bg: #1B2330;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 28px rgba(0, 0, 0, .28);
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding-inline: 20px;
+  padding-block: 0 48px;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.6 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1260px; margin-inline: auto; }
+code, .mono { font-family: var(--font-mono); font-size: .9em; }
+p code, li code, td code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+a { color: var(--accent-ink); text-underline-offset: 2px; }
+a:hover { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+h1, h2, h3, h4 { font-family: var(--font-cond); text-wrap: balance; margin: 0; color: var(--ink); }
+
+/* Header */
+.hero { padding-block: 44px 20px; display: grid; gap: 18px; }
+.eyebrow { margin: 0; color: var(--muted); font-size: 12.5px; letter-spacing: .02em; }
+.eyebrow a { color: var(--muted); }
+.hero h1 { font-size: clamp(44px, 7vw, 76px); line-height: .95; font-weight: 700; letter-spacing: -.01em; }
+.hero h1 span { color: var(--accent); }
+.lede { margin: 0; max-width: 66ch; font-size: 17.5px; color: var(--ink-2); }
+.facts3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; margin-top: 10px; padding-top: 18px; border-top: 1px solid var(--line); }
+.facts3 h2 { font-size: 15px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-ink); margin-bottom: 4px; }
+.facts3 p { margin: 0; color: var(--ink-2); font-size: 14.5px; }
+.toc { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13.5px; }
+.toc a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--line-strong); }
+.toc a:hover { color: var(--accent-ink); border-color: var(--accent); }
+
+/* Player */
+.player { margin-top: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); padding: 18px; display: grid; gap: 14px; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.toolbar h2 { font-size: 22px; font-weight: 600; }
+.seg { display: inline-flex; align-items: center; gap: 4px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
+.seg .seg-label { font-size: 12px; color: var(--muted); padding-inline: 8px 4px; }
+.seg button { font: 500 13.5px var(--font-sans); color: var(--ink-2); background: transparent; border: 0; border-radius: 7px; padding: 6px 12px; cursor: pointer; }
+.seg button[aria-checked="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.12); border: 1px solid var(--line); padding: 5px 11px; }
+.nav { display: inline-flex; align-items: center; gap: 8px; }
+.btn { font: 600 14px var(--font-sans); color: var(--ink); background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 9px; padding: 7px 14px; cursor: pointer; }
+.btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-ink); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn.primary:hover:not(:disabled) { color: var(--on-accent); filter: brightness(1.06); }
+.btn:disabled { opacity: .4; cursor: default; }
+.counter { font-family: var(--font-mono); font-size: 13px; color: var(--muted); min-width: 58px; text-align: center; font-variant-numeric: tabular-nums; }
+
+.rail { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 0; padding: 0; list-style: none; }
+.phase { display: grid; gap: 4px; }
+.phase-name { font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.phase.current .phase-name { color: var(--accent-ink); }
+.dots { display: flex; gap: 4px; }
+.dot { width: 34px; height: 30px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-2); font: 600 13px var(--font-mono); cursor: pointer; font-variant-numeric: tabular-nums; }
+.dot:hover { border-color: var(--accent); }
+.dot.seen { background: var(--surface-2); }
+.dot[aria-current="step"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+
+.stage { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); grid-template-rows: auto 1fr; grid-template-areas: "fig card" "state card"; gap: 16px 22px; align-items: start; }
+.diagram, .state, .card { min-width: 0; }
+.diagram { grid-area: fig; margin: 0; }
+.svg-scroll { overflow-x: auto; border-radius: 12px; }
+.svg-scroll svg { display: block; width: 100%; height: auto; min-width: 700px; }
+.diagram figcaption { font-size: 13px; color: var(--muted); margin-top: 6px; }
+.state { grid-area: state; align-self: start; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.state .ns-col { background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.state h3 { font-size: 13px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin-bottom: 6px; }
+.state ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.state li { font-size: 13.5px; color: var(--ink-2); display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: baseline; }
+.state li code { background: none; padding: 0; color: var(--ink); font-weight: 600; font-size: 13px; }
+.state li.ghost code { text-decoration: line-through; color: var(--muted); }
+.state li .badge { grid-column: 2; justify-self: start; }
+.state .none { color: var(--muted); font-style: italic; font-size: 13.5px; }
+.state-note { grid-column: 1 / -1; font-size: 12.5px; color: var(--muted); margin: 0; }
+.badge { display: inline-block; font: 600 11px var(--font-sans); letter-spacing: .04em; text-transform: uppercase; border-radius: 5px; padding: 1px 6px; }
+.badge.new { background: var(--accent-soft); color: var(--accent-ink); }
+.badge.back { background: var(--ready-soft); color: var(--ready); }
+.badge.gone { background: var(--code-bg); color: var(--muted); }
+
+.card { grid-area: card; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; }
+.card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.card-phase { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; font-weight: 600; color: var(--accent-ink); }
+.card-num { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
+.card h3 { font-size: clamp(24px, 2.4vw, 30px); line-height: 1.12; font-weight: 600; }
+.who { margin: 0; font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-2); background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+.card .lead { margin: 0; font-size: 15.5px; }
+.card ul.facts { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.card ul.facts li { font-size: 14.5px; color: var(--ink-2); }
+.card ul.facts li::marker { color: var(--accent); }
+.oke { border: 1px solid var(--line); background: var(--surface-2); border-radius: 10px; padding: 10px 12px; font-size: 14px; color: var(--ink-2); }
+.oke p { margin: 0; }
+.oke .oke-tag { display: inline-block; font: 600 11px var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--ink); background: var(--band-cp); border-radius: 5px; padding: 2px 7px; margin-bottom: 6px; }
+.oke.hot { border-color: var(--accent); background: var(--accent-soft); }
+.oke.hot .oke-tag { background: var(--accent); color: var(--on-accent); }
+.block h4 { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin-bottom: 4px; font-family: var(--font-sans); }
+.refs { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; }
+.refs li { display: flex; flex-wrap: wrap; gap: 0 8px; font-size: 13px; align-items: baseline; }
+.refs .fn { font-family: var(--font-mono); font-weight: 500; color: var(--ink); }
+.refs a { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
+.refs a:hover { color: var(--accent-ink); }
+pre { margin: 0; background: var(--code-bg); border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; overflow-x: auto; font: 12.5px/1.55 var(--font-mono); color: var(--ink); }
+
+/* Reference sections */
+section.ref { margin-top: 56px; display: grid; gap: 16px; }
+section.ref > h2 { font-size: clamp(26px, 3vw, 34px); font-weight: 600; }
+section.ref > p { margin: 0; max-width: 72ch; color: var(--ink-2); }
+.pipeline { counter-reset: stage; list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.pipeline li { counter-increment: stage; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 6px; align-content: start; position: relative; }
+.pipeline li::before { content: counter(stage); font: 600 13px var(--font-mono); color: var(--on-accent); background: var(--accent); width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; }
+.pipeline li:not(:last-child)::after { content: "→"; position: absolute; right: -11px; top: 16px; color: var(--muted); font-size: 14px; }
+.pipeline h3 { font-size: 17px; font-weight: 600; }
+.pipeline p { margin: 0; font-size: 13.5px; color: var(--ink-2); }
+.pipeline .where { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.fig { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+.fig figcaption { font-size: 13px; color: var(--muted); margin-top: 8px; }
+.table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 14px; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: 0; }
+thead th { font-family: var(--font-cond); font-size: 14px; letter-spacing: .04em; color: var(--ink); background: var(--surface-2); font-weight: 600; }
+tbody th { font-weight: 600; color: var(--ink); width: 24%; }
+td { color: var(--ink-2); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; display: grid; gap: 8px; align-content: start; }
+.panel h3 { font-size: 19px; font-weight: 600; }
+.panel ul, .panel ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--ink-2); font-size: 14.5px; }
+.panel .where { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); margin: 0; }
+footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+footer p { margin: 0 0 4px; }
+
+/* Diagram (SVG) */
+.map text { font-family: var(--font-sans); fill: var(--ink); }
+.map .band-cp { fill: var(--band-cp); }
+.map .band-node { fill: var(--band-node); stroke: var(--line); }
+.map .band-label { font-size: 12.5px; letter-spacing: .14em; fill: var(--muted); font-weight: 600; }
+.map .node .box { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.2; transition: fill .2s, stroke .2s; }
+.map .n-title { font-size: 17px; font-weight: 600; text-anchor: middle; }
+.map .n-sub { font-size: 13px; fill: var(--muted); text-anchor: middle; }
+.map .node.on .box { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2.2; }
+.map .dim { opacity: .46; transition: opacity .2s; }
+.map .grp .box { fill: var(--band-dranet); stroke: var(--accent); stroke-opacity: .5; stroke-dasharray: 6 4; stroke-width: 1.4; }
+.map .grp.on .box { stroke-opacity: 1; stroke-dasharray: none; stroke-width: 2.2; }
+.map .dr-title { font-family: var(--font-cond); font-size: 22px; font-weight: 700; fill: var(--accent-ink); }
+.map .dr-sub { font-size: 12.5px; fill: var(--muted); }
+.map .tag .box { fill: var(--surface-2); stroke: var(--line); stroke-width: 1; }
+.map .tag text { font-size: 12px; text-anchor: middle; fill: var(--ink-2); font-weight: 500; }
+.map .tag.on .box { fill: var(--accent); stroke: var(--accent); }
+.map .tag.on text { fill: var(--on-accent); font-weight: 600; }
+.map .edge path { fill: none; stroke: var(--line-strong); stroke-width: 1.6; marker-end: url(#ah); }
+.map .edge text { font-size: 13px; fill: var(--muted); }
+.map .edge.on path { stroke: var(--accent); stroke-width: 2.4; marker-end: url(#ah-on); stroke-dasharray: 8 5; animation: flow 1s linear infinite; }
+.map .edge.on text { fill: var(--accent-ink); font-weight: 600; }
+.map .ah { fill: var(--line-strong); }
+.map .ah-on { fill: var(--accent); }
+.map .ns .box { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.2; }
+.map .ns.on .box { stroke: var(--accent); stroke-width: 2.2; }
+.map .ns.absent .box { fill: none; stroke-dasharray: 6 5; }
+.map .ns-label { font-size: 12px; letter-spacing: .12em; font-weight: 600; fill: var(--muted); }
+.map .ns-note { font-size: 13px; fill: var(--muted); font-style: italic; }
+.map .row-label { font-size: 11px; fill: var(--muted); }
+.map .chip rect { fill: var(--surface-2); stroke: var(--line-strong); stroke-width: 1.1; }
+.map .chip text { font-family: var(--font-mono); font-size: 12.5px; fill: var(--ink); }
+.map .chip.muted text { fill: var(--muted); }
+.map .chip.dev rect { stroke-dasharray: 3 2; }
+.map .chip.new rect { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.8; }
+.map .chip.snap rect { stroke: var(--accent); stroke-width: 1.8; }
+.map .chip.back rect { fill: var(--ready-soft); stroke: var(--ready); stroke-width: 1.8; }
+.map .chip.ghost rect { fill: none; stroke-dasharray: 4 3; }
+.map .chip.ghost text { fill: var(--muted); text-decoration: line-through; }
+.map .transit path { fill: none; stroke: var(--accent); stroke-width: 2.4; marker-end: url(#ah-on); }
+.map .transit.child path { stroke-dasharray: 6 4; marker-end: none; }
+.map .transit text { font-size: 12px; font-weight: 600; fill: var(--accent-ink); text-anchor: middle; }
+@keyframes flow { to { stroke-dashoffset: -26; } }
+
+.cmp text { font-family: var(--font-sans); fill: var(--ink); }
+.cmp .t { font-family: var(--font-cond); font-size: 19px; font-weight: 600; }
+.cmp .box { fill: var(--surface-2); stroke: var(--line-strong); stroke-width: 1.2; }
+.cmp .lbl { font-size: 11.5px; letter-spacing: .12em; font-weight: 600; fill: var(--muted); }
+.cmp .chip { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.1; }
+.cmp .chip.new { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.8; }
+.cmp .chip.ghost { fill: none; stroke-dasharray: 4 3; }
+.cmp .mono { font-family: var(--font-mono); font-size: 13px; }
+.cmp .ghost-t { fill: var(--muted); text-decoration: line-through; }
+.cmp .note { font-size: 12.5px; fill: var(--muted); }
+.cmp .note.mono { font-family: var(--font-mono); font-size: 12.5px; }
+.cmp .arrow { fill: none; stroke: var(--accent); stroke-width: 2.4; marker-end: url(#cmp-ah); }
+.cmp .link { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 4; }
+.cmp .al { font-size: 12.5px; font-weight: 600; fill: var(--accent-ink); text-anchor: middle; }
+.cmp .ahf { fill: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .map .edge.on path { animation: none; stroke-dasharray: none; }
+  .map .node .box, .map .dim { transition: none; }
+}
+@media (max-width: 1080px) {
+  .stage { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "fig" "card" "state"; }
+  .pipeline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pipeline li::after { display: none; }
+}
+@media (max-width: 720px) {
+  body { font-size: 14.5px; padding-inline: 16px; }
+  .facts3, .two, .state { grid-template-columns: minmax(0, 1fr); }
+  .pipeline { grid-template-columns: minmax(0, 1fr); }
+  .player { padding: 12px; }
+  .toolbar { flex-direction: column; align-items: stretch; }
+  .seg { flex-wrap: wrap; }
+  .nav { justify-content: space-between; }
+}
+</style>
+<style>img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<header class="hero wrap">
+  <p class="eyebrow"><a href="/">&larr; Under the Model</a> · Oguz Pastirmaci</p>
+  <p class="eyebrow mono">kubernetes-sigs/dranet · release <a href="https://github.com/kubernetes-sigs/dranet/tree/v1.5.0" target="_blank" rel="noopener">v1.5.0</a> · released 2026-10-03</p>
+  <h1>Inside <span>dranet</span></h1>
+  <p class="lede">Follow one network device from discovery on the host, through a ResourceClaim, into a Pod network namespace, and back to the host. Each step names the Go code that does the work.</p>
+  <div class="facts3">
+    <div>
+      <h2>Two callers</h2>
+      <p>The kubelet calls dranet over the DRA gRPC API for slow preparation work. The container runtime calls it over NRI while it builds each Pod.</p>
+    </div>
+    <div>
+      <h2>Beside CNI</h2>
+      <p>CNI still owns <code>eth0</code> and the Pod IP. dranet adds whole devices to the Pod: NICs, SR-IOV VFs, RDMA devices, or IPvlan children.</p>
+    </div>
+    <div>
+      <h2>One handoff</h2>
+      <p>The PodConfigStore carries every decision from Prepare to the NRI hooks. A bbolt file keeps it across driver restarts.</p>
+    </div>
+  </div>
+  <nav class="toc" aria-label="Sections">
+    <a href="#walkthrough">Walkthrough</a>
+    <a href="#config">Where the config comes from</a>
+    <a href="#compare">Passthrough or IPvlan child</a>
+    <a href="#rdma">RDMA modes</a>
+    <a href="#ops">Restart and shutdown</a>
+    <a href="#codemap">Code map</a>
+  </nav>
+</header>
+
+<main class="wrap">
+  <section class="player" id="walkthrough" aria-label="Lifecycle walkthrough">
+    <div class="toolbar">
+      <div class="seg" role="radiogroup" aria-label="Example node">
+        <span class="seg-label">Example node</span>
+        <button type="button" role="radio" aria-checked="true" id="scn-oke" data-scn="oke">OKE RDMA NIC</button>
+        <button type="button" role="radio" aria-checked="false" id="scn-generic" data-scn="generic">Passthrough NIC</button>
+      </div>
+      <div class="nav">
+        <button type="button" class="btn" id="prev" aria-label="Previous step">&larr; Prev</button>
+        <span class="counter" id="counter" aria-live="polite">1 / 15</span>
+        <button type="button" class="btn primary" id="next" aria-label="Next step">Next &rarr;</button>
+      </div>
+    </div>
+
+    <ol class="rail" id="rail" aria-label="Steps"></ol>
+
+    <div class="stage">
+      <figure class="diagram">
+        <div class="svg-scroll">
+          <svg class="map" id="map" viewBox="0 0 1000 620" role="img" aria-label="A worker node running dranet. The control plane holds the API server and the scheduler. On the node, the kubelet and the container runtime call the dranet pod. Inside dranet, the DRA hooks save decisions in the PodConfigStore and the NRI hooks load them. The inventory scans the host and feeds the publisher. The lower row shows the host and Pod network namespaces.">
+            <defs>
+              <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
+              <marker id="ah-on" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah-on"/></marker>
+            </defs>
+
+            <rect class="band-cp" x="16" y="12" width="968" height="108" rx="14"/>
+            <text class="band-label" x="36" y="31">CONTROL PLANE</text>
+            <rect class="band-node" x="16" y="156" width="850" height="452" rx="14"/>
+            <text class="band-label" x="44" y="180">WORKER NODE</text>
+
+            <g class="grp" id="g-dranet">
+              <rect class="box" x="40" y="272" width="806" height="210" rx="12"/>
+              <text class="dr-title" x="272" y="418">dranet</text>
+              <text class="dr-sub" x="272" y="438">DaemonSet pod on every node</text>
+              <text class="dr-sub" x="272" y="456">hostNetwork · privileged</text>
+            </g>
+
+            <!-- edges -->
+            <g class="edge" id="e-you-api"><path d="M226,72 H314"/><text x="270" y="64" text-anchor="middle">apply</text></g>
+            <g class="edge" id="e-sched-api"><path d="M806,72 H748"/><text x="776" y="64" text-anchor="middle">allocate</text></g>
+            <g class="edge" id="e-kubelet-api"><path d="M556,190 V106"/><text x="563" y="144">watch Pods, claims</text></g>
+            <g class="edge" id="e-pub-api"><path d="M730,298 V106"/><text x="737" y="144">ResourceSlice</text></g>
+            <g class="edge" id="e-nri-api"><path d="M64,322 H28 V138 H350 V106"/><text x="190" y="133" text-anchor="middle">claim status</text></g>
+            <g class="edge" id="e-kubelet-runtime"><path d="M466,218 H246"/><text x="356" y="210" text-anchor="middle">CRI</text></g>
+            <g class="edge" id="e-runtime-nri"><path d="M144,246 V296"/><text x="151" y="265">NRI</text></g>
+            <g class="edge" id="e-kubelet-dra"><path d="M556,246 V296"/><text x="563" y="265">gRPC · dra.sock</text></g>
+            <g class="edge" id="e-dra-store"><path d="M476,325 H432"/><text x="453" y="317" text-anchor="middle">save</text></g>
+            <g class="edge" id="e-store-nri"><path d="M270,325 H226"/><text x="247" y="317" text-anchor="middle">load</text></g>
+            <g class="edge" id="e-dra-inv"><path d="M556,352 V390"/><text x="563" y="376">lookup</text></g>
+            <g class="edge" id="e-inv-pub"><path d="M640,394 L688,356"/><text x="674" y="384">devices</text></g>
+            <g class="edge" id="e-prov-inv"><path d="M682,419 H638"/><text x="660" y="411" text-anchor="middle">attrs</text></g>
+            <g class="edge" id="e-prov-imds"><path d="M822,419 H878"/><text x="851" y="411" text-anchor="middle">HTTP</text></g>
+            <g class="edge" id="e-inv-host"><path d="M556,446 V506"/><text x="563" y="481">scan</text></g>
+            <g class="edge" id="e-nri-pod"><path d="M144,352 V506"/><text x="151" y="481">move · configure</text></g>
+
+            <!-- control plane -->
+            <g class="node" id="n-you"><rect class="box" x="36" y="40" width="190" height="64" rx="10"/><text class="n-title" x="131" y="67">You</text><text class="n-sub" x="131" y="87">kubectl apply</text></g>
+            <g class="node" id="n-api">
+              <rect class="box" x="316" y="40" width="430" height="64" rx="10"/>
+              <text class="n-title" x="531" y="62">kube-apiserver</text>
+              <g class="tag" id="t-DeviceClass"><rect class="box" x="323" y="71" width="98" height="24" rx="6"/><text x="372" y="87.5">DeviceClass</text></g>
+              <g class="tag" id="t-ResourceClaim"><rect class="box" x="429" y="71" width="98" height="24" rx="6"/><text x="478" y="87.5">ResourceClaim</text></g>
+              <g class="tag" id="t-ResourceSlice"><rect class="box" x="535" y="71" width="98" height="24" rx="6"/><text x="584" y="87.5">ResourceSlice</text></g>
+              <g class="tag" id="t-Pod"><rect class="box" x="641" y="71" width="98" height="24" rx="6"/><text x="690" y="87.5">Pod</text></g>
+            </g>
+            <g class="node" id="n-sched"><rect class="box" x="806" y="40" width="164" height="64" rx="10"/><text class="n-title" x="888" y="67">kube-scheduler</text><text class="n-sub" x="888" y="87">DRA allocator</text></g>
+
+            <!-- node row -->
+            <g class="node" id="n-runtime"><rect class="box" x="44" y="190" width="200" height="56" rx="10"/><text class="n-title" x="144" y="214">Container runtime</text><text class="n-sub" x="144" y="233">containerd or CRI-O</text></g>
+            <g class="node" id="n-kubelet"><rect class="box" x="466" y="190" width="180" height="56" rx="10"/><text class="n-title" x="556" y="214">kubelet</text><text class="n-sub" x="556" y="233">DRA manager</text></g>
+
+            <!-- dranet parts -->
+            <g class="node" id="n-nri"><rect class="box" x="64" y="298" width="160" height="54" rx="9"/><text class="n-title" x="144" y="321">NRI hooks</text><text class="n-sub" x="144" y="340">attach · detach</text></g>
+            <g class="node" id="n-store"><rect class="box" x="270" y="298" width="160" height="54" rx="9"/><text class="n-title" x="350" y="321">PodConfigStore</text><text class="n-sub" x="350" y="340">memory + bbolt</text></g>
+            <g class="node" id="n-dra"><rect class="box" x="476" y="298" width="160" height="54" rx="9"/><text class="n-title" x="556" y="321">DRA hooks</text><text class="n-sub" x="556" y="340">prepare · unprepare</text></g>
+            <g class="node" id="n-pub"><rect class="box" x="682" y="298" width="140" height="54" rx="9"/><text class="n-title" x="752" y="321">Publisher</text><text class="n-sub" x="752" y="340">ResourceSlices</text></g>
+            <g class="node" id="n-inv"><rect class="box" x="476" y="392" width="160" height="54" rx="9"/><text class="n-title" x="556" y="415">Inventory</text><text class="n-sub" x="556" y="434">netlink · sysfs · PCI</text></g>
+            <g class="node" id="n-prov"><rect class="box" x="682" y="392" width="140" height="54" rx="9"/><text class="n-title" x="752" y="415">Cloud provider</text><text class="n-sub" x="752" y="434">attrs · profiles</text></g>
+            <g class="node" id="n-imds"><rect class="box" x="880" y="392" width="104" height="54" rx="9"/><text class="n-title" x="932" y="415">IMDS</text><text class="n-sub" x="932" y="434">cloud metadata</text></g>
+
+            <!-- namespaces -->
+            <g class="ns" id="n-pod"><rect class="box" x="40" y="508" width="380" height="90" rx="10"/><text class="ns-label" x="54" y="527">POD NETWORK NAMESPACE</text><g id="pod-chips"></g></g>
+            <g class="ns" id="n-host"><rect class="box" x="460" y="508" width="386" height="90" rx="10"/><text class="ns-label" x="474" y="527">HOST NETWORK NAMESPACE</text><g id="host-chips"></g></g>
+            <g id="link"></g>
+          </svg>
+        </div>
+        <figcaption>The node as dranet sees it. Highlighted boxes and arrows take part in the current step. The lower row shows the example interfaces: netdevs on the first line, RDMA devices and device files on the second.</figcaption>
+      </figure>
+
+      <div class="state" id="state" aria-live="polite"></div>
+
+      <article class="card" id="card" aria-live="polite"></article>
+    </div>
+  </section>
+
+  <section class="ref" id="config">
+    <h2>Where the applied config comes from</h2>
+    <p>Prepare turns several inputs into one stored DeviceConfig. The order matters, because each stage can override or extend the one before it.</p>
+    <ol class="pipeline">
+      <li>
+        <h3>Pick one opaque config</h3>
+        <p>From <code>status.allocation.devices.config</code>, keep entries for driver <code>dra.net</code> that match the request. Kubernetes lists DeviceClass entries before claim entries. The first valid entry wins. The others are not merged.</p>
+        <span class="where"><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/driver/dra_hooks.go#L241" target="_blank" rel="noopener">dra_hooks.go:241</a></span>
+      </li>
+      <li>
+        <h3>Merge onto the provider config</h3>
+        <p>The provider config is the base. User values win for single fields. Lists are appended and de-duplicated with the user entry kept. Routes are keyed by destination and table.</p>
+        <span class="where"><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/apis/config_merge.go#L30" target="_blank" rel="noopener">config_merge.go:30</a></span>
+      </li>
+      <li>
+        <h3>Resolve the profile</h3>
+        <p>If the result names a <code>profile</code>, the profile provider (cloud or webhook) returns more config, which is merged on top. Without a profile provider, the inventory drops a profile that the cloud provider advertised.</p>
+        <span class="where"><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/driver/dra_hooks.go#L772" target="_blank" rel="noopener">dra_hooks.go:772</a></span>
+      </li>
+      <li>
+        <h3>Validate again</h3>
+        <p>Provider and profile output is external input. The merged result is defaulted and validated before use. A failure releases the profile, so a retry cannot leak it.</p>
+        <span class="where"><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/driver/dra_hooks.go#L786" target="_blank" rel="noopener">dra_hooks.go:786</a></span>
+      </li>
+      <li>
+        <h3>Add the host snapshot</h3>
+        <p>Host addresses, routes, rules, permanent neighbors, and RDMA device files are added. Then the DeviceConfig is saved for the Pod and device.</p>
+        <span class="where"><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/driver/dra_hooks.go#L381" target="_blank" rel="noopener">dra_hooks.go:381</a></span>
+      </li>
+    </ol>
+  </section>
+
+  <section class="ref" id="compare">
+    <h2>Passthrough or IPvlan child</h2>
+    <p>The <code>interface.type</code> field picks one of two attach models. Passthrough is the default. The OKE provider selects IPVLAN for Ethernet RDMA NICs.</p>
+    <figure class="fig">
+      <div class="svg-scroll">
+        <svg class="cmp" viewBox="0 0 920 212" role="img" aria-label="Passthrough moves the whole interface from the host into the Pod. An IPvlan child leaves the parent interface and its address on the host and gives the Pod a new interface on the same link.">
+          <defs><marker id="cmp-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="ahf"/></marker></defs>
+          <text class="t" x="20" y="26">Passthrough (default)</text>
+          <rect class="box" x="20" y="42" width="190" height="150" rx="10"/>
+          <text class="lbl" x="34" y="62">HOST NETNS</text>
+          <rect class="box" x="250" y="42" width="190" height="150" rx="10"/>
+          <text class="lbl" x="264" y="62">POD NETNS</text>
+          <rect class="chip ghost" x="34" y="92" width="56" height="26" rx="6"/>
+          <text class="mono ghost-t" x="44" y="110">eth1</text>
+          <text class="note" x="34" y="146">gone while</text>
+          <text class="note" x="34" y="164">the Pod runs</text>
+          <path class="arrow" d="M92,105 H262"/>
+          <text class="al" x="171" y="97">whole netdev moves</text>
+          <rect class="chip new" x="264" y="92" width="56" height="26" rx="6"/>
+          <text class="mono" x="274" y="110">net1</text>
+          <text class="note mono" x="264" y="146">192.168.10.5/24</text>
+          <text class="note" x="264" y="164">copied from the host</text>
+
+          <text class="t" x="480" y="26">IPvlan child</text>
+          <rect class="box" x="480" y="42" width="190" height="150" rx="10"/>
+          <text class="lbl" x="494" y="62">HOST NETNS</text>
+          <rect class="box" x="710" y="42" width="190" height="150" rx="10"/>
+          <text class="lbl" x="724" y="62">POD NETNS</text>
+          <rect class="chip" x="494" y="92" width="62" height="26" rx="6"/>
+          <text class="mono" x="504" y="110">rdma0</text>
+          <text class="note mono" x="494" y="146">10.224.0.25/12</text>
+          <text class="note" x="494" y="164">parent stays</text>
+          <path class="link" d="M558,105 H722"/>
+          <text class="al" x="640" y="97">child of</text>
+          <rect class="chip new" x="724" y="92" width="62" height="26" rx="6"/>
+          <text class="mono" x="734" y="110">rdma0</text>
+          <text class="note mono" x="724" y="146">10.208.0.25/12</text>
+          <text class="note" x="724" y="164">from config or profile</text>
+        </svg>
+      </div>
+      <figcaption>Passthrough moves the whole interface into the Pod. An IPvlan child leaves the parent and its address on the host, and gives the Pod a second interface on the same link. Addresses are OKE-style examples.</figcaption>
+    </figure>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th scope="col"></th><th scope="col">Passthrough</th><th scope="col">IPvlan child (<code>type: IPVLAN</code>)</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Host interface while the Pod runs</th><td>Gone from the host</td><td>Stays on the host with its address</td></tr>
+          <tr><th scope="row">Pod addresses</th><td>Host global addresses copied, or set in config, or DHCP</td><td>Set in config or by a profile, or <code>addressing: Unnumbered</code></td></tr>
+          <tr><th scope="row">Routes and rules</th><td>Host routes of that interface and their table rules are copied</td><td>Only from config or a profile</td></tr>
+          <tr><th scope="row">MTU and MAC</th><td>Both can be set. A VF MTU cannot exceed its PF.</td><td>MTU up to the parent MTU. MAC is the parent MAC and cannot be set.</td></tr>
+          <tr><th scope="row">RDMA namespace mode</th><td>Shared or exclusive</td><td>Shared only, when the parent has an RDMA device</td></tr>
+          <tr><th scope="row">On Pod stop</th><td>Moved back under its host name and set up. dranet does not restore the host addresses.</td><td>Child deleted</td></tr>
+          <tr><th scope="row">Code</th><td><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/driver/hostdevice.go#L36" target="_blank" rel="noopener"><code>nsAttachNetdev</code></a></td><td><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/driver/subinterfaces.go#L47" target="_blank" rel="noopener"><code>addIPVlan</code></a></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="ref" id="rdma">
+    <h2>RDMA modes</h2>
+    <p>The RDMA subsystem has a network namespace mode for the whole node. dranet reads it once at start (<code>rdma system show</code> prints it). If the read fails, dranet assumes shared mode.</p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th scope="col"></th><th scope="col">Shared (<code>ib_core netns_mode=1</code>)</th><th scope="col">Exclusive (<code>netns_mode=0</code>)</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Device files (<code>uverbsN</code>, <code>rdma_cm</code>)</th><td>Added to every container of the Pod</td><td>Added to every container of the Pod</td></tr>
+          <tr><th scope="row">Netdev</th><td>Moved (passthrough) or IPvlan child</td><td>Moved (passthrough). IPvlan claims fail at Prepare.</td></tr>
+          <tr><th scope="row">RDMA link device (<code>mlx5_N</code>)</th><td>Stays on the host, shared by all namespaces</td><td>Moved into the Pod. On stop it returns before the netdev.</td></tr>
+          <tr><th scope="row">RDMA-only device (no netdev)</th><td>Device files only. Condition <code>Ready</code> (<code>RDMAOnlyDeviceReady</code>).</td><td>RDMA link moved. Conditions <code>RDMALinkReady</code> and <code>Ready</code>.</td></tr>
+          <tr><th scope="row">Code</th><td colspan="2"><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/driver/nri_hooks.go#L193" target="_blank" rel="noopener"><code>runPodSandbox</code> blocks 2 and 3</a> · <a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/driver/dra_hooks.go#L491" target="_blank" rel="noopener">IPvlan check in <code>prepareDevice</code></a></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="ref" id="ops">
+    <h2>Restart and shutdown</h2>
+    <div class="two">
+      <div class="panel">
+        <h3>After a restart</h3>
+        <ul>
+          <li>The bbolt file reloads every stored device config. Netns paths are not stored. <code>Synchronize</code> gets them again from the runtime.</li>
+          <li>Prepare is idempotent. A device already stored for the Pod is reused, so a second profile allocation cannot leak.</li>
+          <li>NRI hooks must be idempotent too. The runtime can retry a Pod start many times, and each retry calls the hooks again.</li>
+          <li>A save goes to bbolt before memory. If the disk write fails, Prepare fails and memory does not change.</li>
+        </ul>
+        <p class="where"><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/driver/pod_device_config.go#L187" target="_blank" rel="noopener">pod_device_config.go:187</a> · <a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/driver/nri_hooks.go#L43" target="_blank" rel="noopener">nri_hooks.go:43</a></p>
+      </div>
+      <div class="panel">
+        <h3>Graceful stop</h3>
+        <ol>
+          <li>Stop the kubelet plugin. No new Prepare calls arrive.</li>
+          <li>Wait until each prepared Pod has had no NRI activity for 10 s. Poll every 5 s. Give up after 5 min. The Pod termination grace period (30 s by default) usually ends first.</li>
+          <li>Cancel the context and stop the NRI plugin.</li>
+        </ol>
+        <p>This order stops a Pod from starting without its devices when dranet is upgraded while Pods are being created.</p>
+        <p class="where"><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/driver/driver.go#L266" target="_blank" rel="noopener">driver.go:266</a></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="ref" id="codemap">
+    <h2>Code map</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th scope="col">Package</th><th scope="col">What it does</th><th scope="col">Start reading at</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><code>cmd/dranet</code></th><td>Process wiring: flags, health server, store, filter, providers, driver start</td><td><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/cmd/dranet/app.go#L101" target="_blank" rel="noopener"><code>main</code> app.go:101</a></td></tr>
+          <tr><th scope="row"><code>pkg/driver</code></th><td>DRA hooks, NRI hooks, netns moves, L3 config (routes, rules, VRF, neighbors), ethtool, eBPF, DHCP, PodConfigStore</td><td><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/driver/dra_hooks.go#L230" target="_blank" rel="noopener"><code>prepareDevice</code> dra_hooks.go:230</a><br><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/driver/nri_hooks.go#L147" target="_blank" rel="noopener"><code>runPodSandbox</code> nri_hooks.go:147</a></td></tr>
+          <tr><th scope="row"><code>pkg/inventory</code></th><td>Device discovery, attributes, rescan loop, provider calls</td><td><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/inventory/db.go#L214" target="_blank" rel="noopener"><code>scan</code> db.go:214</a></td></tr>
+          <tr><th scope="row"><code>pkg/apis</code></th><td>NetworkConfig types, defaults, validation, merge</td><td><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/apis/types.go#L21" target="_blank" rel="noopener"><code>NetworkConfig</code> types.go:21</a></td></tr>
+          <tr><th scope="row"><code>pkg/cloudprovider</code></th><td>Provider interfaces, detection, and the GCE, AWS, Azure, Alibaba, CoreWeave, OKE, and webhook providers</td><td><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/cloudprovider/cloud.go#L35" target="_blank" rel="noopener"><code>CloudInstance</code> cloud.go:35</a></td></tr>
+          <tr><th scope="row"><code>pkg/filter</code></th><td>CEL filter applied at publish time</td><td><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/filter/filter.go#L27" target="_blank" rel="noopener"><code>FilterDevices</code> filter.go:27</a></td></tr>
+          <tr><th scope="row"><code>pkg/names</code></th><td>Device names from PCI addresses and interface names</td><td><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/names/names.go#L60" target="_blank" rel="noopener"><code>NormalizePCIAddress</code> names.go:60</a></td></tr>
+          <tr><th scope="row"><code>internal/nlwrap</code></th><td>netlink wrapper from moby that retries interrupted dumps</td><td><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/internal/nlwrap/netlink.go#L75" target="_blank" rel="noopener"><code>retryOnIntr</code> netlink.go:75</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <p>Source: kubernetes-sigs/dranet, release v1.5.0 (2026-10-03). Line numbers refer to that release. Code links open GitHub at that tag.</p>
+    <p>Interface names, addresses, and PCI addresses in the examples are illustrative. The OKE child address follows the formula in <code>deriveRDMAIPv4</code>.</p>
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var RELEASE = "v1.5.0";
+  var GH = "https://github.com/kubernetes-sigs/dranet/blob/" + RELEASE + "/";
+  var PHASES = ["Boot", "Advertise", "Allocate", "Prepare", "Attach", "Run", "Release"];
+
+  var SAMPLES = {
+    slice: {
+      generic: [
+        "apiVersion: resource.k8s.io/v1",
+        "kind: ResourceSlice",
+        "spec:",
+        "  driver: dra.net",
+        "  nodeName: worker-1",
+        "  pool: {name: worker-1}",
+        "  devices:",
+        "  - name: pci-0000-8a-00-0",
+        "    attributes:",
+        "      dra.net/ifName:     {string: eth1}",
+        "      dra.net/ipv4:       {string: 192.168.10.5}",
+        "      dra.net/rdma:       {bool: true}",
+        "      dra.net/rdmaDevice: {string: mlx5_1}",
+        "      dra.net/numaNode:   {int: 1}"
+      ].join("\n"),
+      oke: [
+        "apiVersion: resource.k8s.io/v1",
+        "kind: ResourceSlice",
+        "spec:",
+        "  driver: dra.net",
+        "  nodeName: worker-1",
+        "  pool: {name: worker-1}",
+        "  devices:",
+        "  - name: pci-0000-0c-00-0",
+        "    attributes:",
+        "      dra.net/ifName:      {string: rdma0}",
+        "      dra.net/ipv4:        {string: 10.224.0.25}",
+        "      dra.net/rdma:        {bool: true}",
+        "      dra.net/rdmaDevice:  {string: mlx5_0}",
+        "      oke.dra.net/shape:   {string: BM.GPU.H100.8}",
+        "      oke.dra.net/rdmaFabricPlanes: {int: 1}"
+      ].join("\n")
+    },
+    request: {
+      generic: [
+        "apiVersion: resource.k8s.io/v1",
+        "kind: DeviceClass",
+        "metadata: {name: dranet-rdma}",
+        "spec:",
+        "  selectors:",
+        "  - cel:",
+        "      expression: >-",
+        "        device.driver == \"dra.net\" &&",
+        "        device.attributes[\"dra.net\"].rdma",
+        "---",
+        "apiVersion: resource.k8s.io/v1",
+        "kind: ResourceClaimTemplate",
+        "metadata: {name: one-nic}",
+        "spec:",
+        "  spec:",
+        "    devices:",
+        "      requests:",
+        "      - name: nic",
+        "        exactly: {deviceClassName: dranet-rdma}",
+        "      config:",
+        "      - opaque:",
+        "          driver: dra.net",
+        "          parameters:",
+        "            interface: {name: net1}",
+        "---",
+        "apiVersion: v1",
+        "kind: Pod",
+        "spec:",
+        "  resourceClaims:",
+        "  - {name: nic, resourceClaimTemplateName: one-nic}",
+        "  containers: [...]"
+      ].join("\n"),
+      oke: [
+        "apiVersion: resource.k8s.io/v1",
+        "kind: DeviceClass",
+        "metadata: {name: oke-rdma-nic}",
+        "spec:",
+        "  selectors:",
+        "  - cel:",
+        "      expression: >-",
+        "        device.driver == \"dra.net\" &&",
+        "        device.attributes[\"dra.net\"].rdma &&",
+        "        device.attributes[\"dra.net\"].ifName.startsWith(\"rdma\")",
+        "---",
+        "apiVersion: resource.k8s.io/v1",
+        "kind: ResourceClaimTemplate",
+        "metadata: {name: one-rdma-nic}",
+        "spec:",
+        "  spec:",
+        "    devices:",
+        "      requests:",
+        "      - name: nic",
+        "        exactly: {deviceClassName: oke-rdma-nic}",
+        "      # no config: the oke-rdma profile supplies it",
+        "---",
+        "apiVersion: v1",
+        "kind: Pod",
+        "spec:",
+        "  resourceClaims:",
+        "  - {name: nic, resourceClaimTemplateName: one-rdma-nic}",
+        "  containers: [...]"
+      ].join("\n")
+    },
+    status: {
+      generic: [
+        "status:",
+        "  devices:",
+        "  - driver: dra.net",
+        "    pool: worker-1",
+        "    device: pci-0000-8a-00-0",
+        "    conditions:",
+        "    - {type: Ready, status: \"True\", reason: NetworkDeviceReady}",
+        "    - {type: NetworkReady, status: \"True\", reason: NetworkReady}",
+        "    networkData:",
+        "      interfaceName: net1",
+        "      hardwareAddress: 0c:42:a1:3b:5e:10",
+        "      ips: [192.168.10.5/24]"
+      ].join("\n"),
+      oke: [
+        "status:",
+        "  devices:",
+        "  - driver: dra.net",
+        "    pool: worker-1",
+        "    device: pci-0000-0c-00-0",
+        "    conditions:",
+        "    - {type: NetworkReady, status: \"True\", reason: NetworkReady}",
+        "    - {type: Ready, status: \"True\", reason: NetworkDeviceReady}",
+        "    networkData:",
+        "      interfaceName: rdma0",
+        "      hardwareAddress: a0:88:c2:12:34:56   # the parent MAC (IPvlan)",
+        "      ips: [10.208.0.25/12]"
+      ].join("\n")
+    }
+  };
+
+  var STEPS = [
+    {
+      phase: "Boot",
+      title: "The DaemonSet starts on the node",
+      who: "kube-apiserver → kubelet → container runtime",
+      lead: "dranet runs as one privileged pod per node. It needs the host view of network devices, so it shares the host network namespace and mounts host paths.",
+      facts: [
+        "Pod spec: <code>hostNetwork: true</code>, <code>privileged: true</code>, and a toleration for all NoSchedule taints.",
+        "Host mounts: <code>/var/lib/kubelet/plugins</code>, <code>/var/lib/kubelet/plugins_registry</code>, <code>/var/run/nri</code>, <code>/var/run/netns</code>, <code>/dev/infiniband</code>, <code>/sys/fs/bpf</code>, and <code>/var/run/dranet</code> for the state file.",
+        "RBAC: read Nodes, DeviceClasses, and ResourceClaims. Write ResourceSlices, claim status, and Events. There is no access to Pods. Pod data arrives through the kubelet and NRI.",
+        "The install ships no DeviceClass. You create one, for example with <code>device.driver == \"dra.net\"</code>."
+      ],
+      oke: "For native InfiniBand NICs, set <code>--move-ib-interfaces=false</code> (Helm <code>args.moveIBInterfaces: false</code>). The <code>oke-rdma</code> profile needs the RDMA subsystem in shared mode (<code>ib_core netns_mode=1</code>).",
+      code: [["DaemonSet and RBAC", "install.yaml", 15], ["Helm DaemonSet", "deployments/helm/dranet/templates/daemonset.yaml", 1]],
+      tryIt: "kubectl -n kube-system get ds dranet",
+      nodes: ["api", "kubelet", "runtime"], edges: ["kubelet-api", "kubelet-runtime"], group: true
+    },
+    {
+      phase: "Boot",
+      title: "The process wires itself up",
+      who: "dranet main()",
+      lead: "<code>main()</code> builds the parts in a fixed order. <code>/healthz</code> returns 503 until the last part is up.",
+      facts: [
+        "Parse flags and feature gates. Serve <code>/healthz</code> and <code>/metrics</code> on port 9177.",
+        "Open the PodConfigStore. With <code>--db-path</code> (default <code>/var/run/dranet/dranet.db</code>) it reloads every stored device config from the bbolt file, so claims prepared before a restart are still known.",
+        "Compile the <code>--filter</code> CEL expression. The default hides veth devices.",
+        "Pick a cloud provider. The probes run in this order: GCE, AWS, Azure, OKE, Alibaba, CoreWeave, webhook. The first match wins. <code>--cloud-provider-hint</code> skips the probes. <code>--cloud-provider-options</code> passes <code>&lt;provider&gt;.&lt;option&gt;=&lt;value&gt;</code> settings to a provider, and an invalid option stops startup.",
+        "Build the inventory, call <code>driver.Start</code>, then mark the process ready."
+      ],
+      oke: "The OKE provider reads the Oracle Cloud Agent RDMA files once (<code>rdma_network.json</code>, default network <code>10.224.0.0/12</code>). It polls IMDS at <code>169.254.169.254/opc/v2</code> for up to 15 s, then refreshes every 5 min in the background. If IMDS is late, startup continues and the refresh loop retries.",
+      code: [["main", "cmd/dranet/app.go", 101], ["NewPodConfigStore", "pkg/driver/pod_device_config.go", 162], ["setupProviders", "cmd/dranet/app.go", 302], ["cloudProviderProbes", "pkg/cloudprovider/discovery/discovery.go", 73], ["OKEInstance.start", "pkg/cloudprovider/oke/oke.go", 981]],
+      tryIt: "kubectl -n kube-system logs ds/dranet | head -40",
+      nodes: ["store", "prov", "imds"], edges: ["prov-imds"], group: true
+    },
+    {
+      phase: "Boot",
+      title: "Register with the kubelet and the runtime",
+      who: "dranet → kubelet (plugin registration) · dranet → runtime (NRI)",
+      lead: "<code>driver.Start</code> connects dranet to the two node components that call it later. The kubelet calls it for slow preparation. The runtime calls it while it builds each Pod.",
+      facts: [
+        "Read the RDMA network namespace mode once. Shared mode keeps RDMA link devices on the host. Exclusive mode moves them into Pods. If the read fails, dranet assumes shared.",
+        "Start the kubelet plugin: registration socket <code>dra.net-reg.sock</code> in <code>plugins_registry</code>, gRPC socket <code>dra.sock</code> in <code>plugins/dra.net</code>. Wait up to 30 s for the kubelet to confirm.",
+        "Start an NRI plugin named <code>dra.net</code> with index <code>00</code>. It receives RunPodSandbox, StopPodSandbox, RemovePodSandbox, CreateContainer, and a Synchronize list of running Pods.",
+        "In Synchronize, dranet records the netns path again for each stored Pod that still runs.",
+        "Start the inventory loop and the publisher. The NRI plugin and the inventory restart up to 5 times, then the process exits."
+      ],
+      oke: null,
+      code: [["Start", "pkg/driver/driver.go", 123], ["kubeletplugin.Start", "pkg/driver/driver.go", 171], ["stub.New (NRI)", "pkg/driver/driver.go", 197], ["Synchronize", "pkg/driver/nri_hooks.go", 43]],
+      tryIt: "# on the node\nls /var/lib/kubelet/plugins_registry/ /var/lib/kubelet/plugins/dra.net/",
+      nodes: ["kubelet", "runtime", "dra", "nri", "inv", "pub"], edges: ["kubelet-dra", "runtime-nri"]
+    },
+    {
+      phase: "Advertise",
+      title: "Discover the network devices",
+      who: "Inventory ← kernel (netlink, sysfs, PCI) · Cloud provider ← IMDS",
+      lead: "The inventory builds one device list from three sources and keeps it current while the node runs.",
+      facts: [
+        "PCI: network-class devices with a kernel driver bound (not <code>vfio-pci</code> and similar). The name is <code>pci-</code> plus the address, for example <code>pci-0000-8a-00-0</code>.",
+        "RDMA devices that the PCI pass missed, for example eRDMA or InfiniBand-only devices.",
+        "netlink links: a link with a PCI address joins its PCI device. Other links, for example bonds, become their own device. Loopback, <code>docker0</code>, and Cilium links are skipped.",
+        "Attributes include <code>dra.net/ifName</code>, <code>mac</code>, <code>mtu</code>, <code>ipv4</code>, <code>rdma</code>, <code>rdmaDevice</code>, <code>pciAddress</code>, <code>numaNode</code>, and <code>sriov</code>, plus <code>resource.kubernetes.io/pcieRoot</code> for alignment with GPUs.",
+        "The provider adds cloud attributes and a per-device config. The default-route uplink and its children are removed, so the node keeps its own connectivity.",
+        "A new scan starts on a link event, on an explicit request, or after 1 min. A rate limiter allows one scan per 2 s, with a burst of 5."
+      ],
+      oke: "Every device gets node-level IMDS attributes: <code>oke.dra.net/shape</code>, <code>hpcIslandId</code>, <code>networkBlockId</code>, <code>localBlockId</code>, <code>rackId</code>, <code>gpuMemoryFabricId</code>, <code>rdmaFabricIpv6</code>, <code>rdmaFabricPlanes</code>. On an IPv4 RDMA fabric, every device also gets <code>rdmaChildIpv4Cidr</code>, the configured child range. Each Ethernet RDMA NIC gets the config <code>profile: oke-rdma</code> with type IPVLAN, so that NIC never moves into a Pod. An IPv6 RDMA fabric gets no profile yet.",
+      code: [["DB.Run", "pkg/inventory/db.go", 168], ["DB.scan", "pkg/inventory/db.go", 214], ["discoverPCIDevices", "pkg/inventory/db.go", 269], ["discoverNetworkInterfaces", "pkg/inventory/db.go", 303], ["addCloudAttributes", "pkg/inventory/db.go", 531], ["OKEInstance.GetDeviceConfig", "pkg/cloudprovider/oke/oke.go", 416]],
+      tryIt: "kubectl -n kube-system logs ds/dranet | grep 'devices from inventory'",
+      nodes: ["inv", "prov", "imds", "host"], edges: ["inv-host", "prov-inv", "prov-imds"]
+    },
+    {
+      phase: "Advertise",
+      title: "Publish ResourceSlices",
+      who: "Inventory → Publisher → kube-apiserver",
+      lead: "Each inventory update causes one publish. There is no separate timer.",
+      facts: [
+        "With the <code>PersistentResourceSliceAttributes</code> gate (alpha, off by default), stored snapshots of devices that are now inside Pods are merged in. Live values win.",
+        "The CEL filter runs on the merged list. A device that fails to evaluate stays in the list.",
+        "All devices go into one pool named after the node. The kubelet plugin library writes the ResourceSlice objects and makes the Node their owner.",
+        "Without the gate, a device inside a Pod has no host netdev, so its netdev attributes (<code>ifName</code>, <code>ipv4</code>, and others) are missing until it returns."
+      ],
+      oke: "The slice carries the <code>oke.dra.net/*</code> attributes. The profile is not an attribute: the inventory keeps it and uses it at Prepare.",
+      code: [["PublishResources", "pkg/driver/dra_hooks.go", 60], ["mergeDevices", "pkg/driver/dra_hooks.go", 802], ["FilterDevices", "pkg/filter/filter.go", 27]],
+      sample: "slice",
+      tryIt: "kubectl get resourceslices -o wide",
+      nodes: ["inv", "pub", "api"], edges: ["inv-pub", "pub-api"], tags: ["ResourceSlice"]
+    },
+    {
+      phase: "Allocate",
+      title: "You ask for a device",
+      who: "You → kube-apiserver",
+      lead: "A workload asks for a NIC the same way it asks for a GPU. It uses three objects.",
+      facts: [
+        "<strong>DeviceClass</strong>: which devices qualify, as CEL over the published attributes.",
+        "<strong>ResourceClaim</strong> or <strong>ResourceClaimTemplate</strong>: how many devices, extra selectors, and optional opaque config for <code>dra.net</code>.",
+        "<strong>Pod</strong>: lists the claim under <code>spec.resourceClaims</code>.",
+        "The opaque parameters are a dranet NetworkConfig: <code>interface</code> (name, addresses, mtu, type, vrf, and more), <code>routes</code>, <code>rules</code>, <code>neighbors</code>, <code>ethtool</code>, <code>profile</code>. Unknown fields are errors.",
+        "Config can sit in the DeviceClass or in the claim. Kubernetes lists class entries first. dranet uses the first valid entry for the request and ignores the others."
+      ],
+      oke: "Do not set <code>interface.addresses</code>, DHCP, Unnumbered, or <code>type: Passthrough</code>. The <code>oke-rdma</code> profile assigns the address and rejects those settings.",
+      code: [["NetworkConfig", "pkg/apis/types.go", 21], ["ValidateConfig", "pkg/apis/validation.go", 44], ["config selection", "pkg/driver/dra_hooks.go", 241], ["validateOKEProfileRequest", "pkg/cloudprovider/oke/oke.go", 590]],
+      sample: "request",
+      nodes: ["you", "api"], edges: ["you-api"], tags: ["DeviceClass", "ResourceClaim", "Pod"]
+    },
+    {
+      phase: "Allocate",
+      title: "The scheduler allocates a device",
+      who: "kube-scheduler ↔ kube-apiserver",
+      lead: "dranet has no part in this step. The scheduler works only from the ResourceSlices and the claims.",
+      facts: [
+        "It evaluates the CEL selectors against device attributes and picks a node with free matching devices. A <code>matchAttribute</code> constraint on <code>resource.kubernetes.io/pcieRoot</code> can align the NIC with a GPU from another driver.",
+        "It writes <code>status.allocation</code> on the claim: driver <code>dra.net</code>, the pool (node name), the device name, and the config entries copied from the class and the claim.",
+        "It adds the Pod to <code>status.reservedFor</code> and binds the Pod to the node.",
+        "A device goes to one claim at a time. dranet also accepts only one Pod per claim."
+      ],
+      oke: null,
+      code: [["one Pod per claim", "pkg/driver/dra_hooks.go", 164]],
+      tryIt: "kubectl get resourceclaim <claim> -o jsonpath='{.status.allocation.devices.results}'",
+      nodes: ["sched", "api"], edges: ["sched-api"], tags: ["ResourceClaim", "ResourceSlice", "Pod"]
+    },
+    {
+      phase: "Prepare",
+      title: "The kubelet asks dranet to prepare",
+      who: "kubelet → DRA hooks (gRPC NodePrepareResources) → PodConfigStore",
+      lead: "The kubelet calls NodePrepareResources before it creates the Pod sandbox. dranet does all slow work here, because the later NRI hook runs inside sandbox creation and must return fast.",
+      facts: [
+        "Check <code>reservedFor</code>: exactly one Pod. Skip devices of other drivers. Skip a device that is already prepared for this Pod, so a retry is safe.",
+        "Resolve the config: the first valid <code>dra.net</code> entry, merged onto the provider config, plus the profile result, then validated again.",
+        "Snapshot what must follow the interface: global addresses (unless the config sets addresses or DHCP), its routes except the local table, the rules for those tables, and permanent neighbor entries.",
+        "Optional work: a DHCP request on the host interface (5 s timeout, the result is only recorded), ethtool feature names mapped to kernel names, a VF MTU check against its PF, and eBPF programs unpinned.",
+        "RDMA: find the RDMA device (for example <code>mlx5_1</code>) and its device files <code>uverbsN</code> and <code>rdma_cm</code>.",
+        "Save one DeviceConfig per Pod and device. The bbolt file is written first, then memory.",
+        "On error the claim gets a <code>ClaimPrepareFailed</code> Event, the Pod stays in ContainerCreating, and the kubelet retries."
+      ],
+      oke: "The <code>oke-rdma</code> profile resolves here. It checks for IPv4 RDMA fabric data, a known primary VNIC, the OCA classic address mode, an Ethernet parent, and the expected parent address. The child keeps the parent offset inside the child range: child range + (RDMA NIC index × VNIC subnet size + host position). The default range is <code>10.208.0.0/12</code>, and <code>--cloud-provider-options=oke.rdma-child-ipv4-cidr=&lt;cidr&gt;</code> sets another one. The claim fails if the range overlaps a VNIC subnet or a host route (except the default route), or holds the Kubernetes service address. Example: VNIC 10.0.64.25 in 10.0.64.0/18 and NIC <code>rdma0</code> give parent 10.224.0.25 and child 10.208.0.25/12. The route <code>10.208.0.0/12</code> goes into table 100 + index, with a source rule at priority 32000. An index above 15 is rejected, so the tables stay within 100 to 115. Unset ARP settings come from the parent.",
+      code: [["PrepareResourceClaims", "pkg/driver/dra_hooks.go", 111], ["prepareDevice", "pkg/driver/dra_hooks.go", 230], ["getDeviceNetworkConfig", "pkg/driver/dra_hooks.go", 764], ["MergeNetworkConfig", "pkg/apis/config_merge.go", 30], ["SetDeviceConfig", "pkg/driver/pod_device_config.go", 244], ["OKEInstance.GetProfileConfig", "pkg/cloudprovider/oke/oke.go", 436]],
+      tryIt: "kubectl describe resourceclaim <claim>    # Events show ClaimPrepareFailed\nkubectl -n kube-system logs ds/dranet | grep PrepareResourceClaim",
+      nodes: ["kubelet", "dra", "store", "inv", "prov", "host", "api"], edges: ["kubelet-api", "kubelet-dra", "dra-store", "dra-inv", "prov-inv"]
+    },
+    {
+      phase: "Prepare",
+      title: "The runtime creates the sandbox",
+      who: "kubelet → container runtime (CRI RunPodSandbox) → CNI",
+      lead: "The kubelet asks the runtime for the Pod sandbox. The runtime creates the network namespace and runs the cluster CNI plugin as usual. CNI sets up <code>eth0</code> and the Pod IP.",
+      facts: [
+        "dranet works beside any CNI plugin. It does not touch <code>eth0</code>.",
+        "Once the namespace exists, the runtime calls the NRI plugins in index order. dranet has index <code>00</code>.",
+        "A Pod with <code>hostNetwork: true</code> has no namespace of its own. dranet fails its RunPodSandbox, so such a Pod cannot use a dranet device."
+      ],
+      oke: null,
+      code: [["NRI hook rules (comment)", "pkg/driver/nri_hooks.go", 36], ["host network check", "pkg/driver/nri_hooks.go", 152]],
+      nodes: ["kubelet", "runtime", "pod"], edges: ["kubelet-runtime"]
+    },
+    {
+      phase: "Attach",
+      title: "NRI RunPodSandbox: move and configure",
+      who: "runtime → NRI hooks → kernel · NRI hooks → kube-apiserver (claim status)",
+      lead: "dranet loads the stored DeviceConfig and applies it to the new namespace. There are no API reads and no scans in this hook.",
+      facts: [
+        "Passthrough: set <code>eth1</code> down. One <code>RTM_NEWLINK</code> message renames it to <code>net1</code>, sets MTU, MAC, and GSO/GRO limits if configured, and moves it into the Pod namespace.",
+        "In the Pod namespace: the ARP and <code>acceptRA</code> sysctls first, then addresses, then link up. <code>acceptRA</code> needs an MTU of at least 1280.",
+        "Then, in order: ethtool features, eBPF detach (if asked), VRF, routes, rules (skipped with a VRF), permanent neighbors.",
+        "IPVLAN type: dranet creates a child of the host interface directly in the Pod namespace (temporary name, then renamed) and configures it the same way. On a config error it deletes the child.",
+        "Exclusive RDMA mode only: the RDMA link device moves into the namespace too.",
+        "Status: a background server-side apply (3 s timeout) writes the conditions <code>Ready</code> and <code>NetworkReady</code> (plus <code>RDMALinkReady</code> in exclusive mode) and <code>networkData</code> with the interface name, MAC, and IPs."
+      ],
+      oke: "<code>rdma0</code> stays on the host with its OCA address. dranet creates an IPvlan L2 child named <code>rdma0</code> in the Pod with 10.208.0.25/12, the table 100 route, and the priority 32000 rule. <code>mlx5_0</code> stays on the host (shared mode).",
+      code: [["RunPodSandbox", "pkg/driver/nri_hooks.go", 122], ["nsAttachNetdev", "pkg/driver/hostdevice.go", 36], ["addIPVlan", "pkg/driver/subinterfaces.go", 47], ["configureNetdevInNS", "pkg/driver/nri_hooks.go", 332], ["applyRoutingConfig", "pkg/driver/netnamespace.go", 37], ["nsAttachRdmadev", "pkg/driver/rdmadevice.go", 33]],
+      sample: "status",
+      tryIt: "kubectl get resourceclaim <claim> -o jsonpath='{.status.devices}'",
+      nodes: ["runtime", "nri", "store", "pod", "host", "api"], edges: ["runtime-nri", "store-nri", "nri-pod", "nri-api"], tags: ["ResourceClaim"]
+    },
+    {
+      phase: "Attach",
+      title: "NRI CreateContainer: RDMA device files",
+      who: "runtime → NRI hooks",
+      lead: "For each container, the runtime asks NRI plugins for adjustments. dranet adds the RDMA device files of the Pod's devices.",
+      facts: [
+        "It adds <code>/dev/infiniband/rdma_cm</code> and <code>/dev/infiniband/uverbsN</code>, each once, with the type and major/minor numbers read on the host.",
+        "Every container in the Pod gets them, not only one container.",
+        "A device without RDMA adds nothing.",
+        "The hook records the time of this NRI activity. Graceful shutdown uses it."
+      ],
+      oke: "The containers get <code>/dev/infiniband/uverbs0</code> and <code>rdma_cm</code> for <code>mlx5_0</code>. RDMA traffic uses the child address through the shared host RDMA device.",
+      code: [["CreateContainer", "pkg/driver/nri_hooks.go", 67], ["createContainer", "pkg/driver/nri_hooks.go", 97], ["buildRDMAConfig", "pkg/driver/dra_hooks.go", 625]],
+      nodes: ["runtime", "nri", "store", "pod"], edges: ["runtime-nri", "store-nri"]
+    },
+    {
+      phase: "Run",
+      title: "The Pod runs",
+      who: "no dranet activity",
+      lead: "The application sees two kinds of interfaces. <code>eth0</code> from CNI carries cluster traffic. The dranet interface has its own address and routes. RDMA libraries open the device files.",
+      facts: [
+        "dranet does no work while the Pod runs.",
+        "The claim status shows what was attached: interface name, MAC, IPs, and conditions.",
+        "The device stays allocated to this claim, so the scheduler does not give it to another Pod."
+      ],
+      oke: "The host keeps <code>rdma0</code>, its OCA address, and <code>mlx5_0</code>. For native InfiniBand NICs the code gives the reason: the host health checks need the NIC and its RDMA device.",
+      code: [["infiniBandHostError", "pkg/cloudprovider/oke/oke.go", 548]],
+      tryIt: "kubectl exec <pod> -- ip -br addr",
+      nodes: ["pod"], edges: []
+    },
+    {
+      phase: "Release",
+      title: "NRI StopPodSandbox: give the device back",
+      who: "kubelet → runtime → NRI hooks → kernel",
+      lead: "When the Pod stops, dranet returns the devices to the host. It logs errors but never fails the stop.",
+      facts: [
+        "The netns path comes from the hook. Some containerd versions leave it out, so dranet falls back to the stored path.",
+        "Exclusive mode: the RDMA link returns first. The netdev return triggers a rescan, and that scan must see the RDMA device.",
+        "Passthrough: set <code>net1</code> down, move it to the host namespace under its host name <code>eth1</code>, and set it up. The kernel drops addresses when an interface changes namespace, and dranet does not add the host addresses back.",
+        "IPVLAN: delete the child in the Pod namespace. If the namespace is already gone, the kernel deleted the child with it.",
+        "If the RDMA link came back but no netdev did, dranet asks the inventory for a rescan. Otherwise the link event is enough.",
+        "If dranet misses this hook, the kernel still moves physical interfaces back to the host when it destroys the namespace."
+      ],
+      oke: "Only the IPvlan child is deleted. <code>rdma0</code> never left the host, so nothing moves and its OCA address stays.",
+      code: [["StopPodSandbox", "pkg/driver/nri_hooks.go", 400], ["stopPodSandbox", "pkg/driver/nri_hooks.go", 425], ["nsDetachNetdevFromNS", "pkg/driver/hostdevice.go", 188], ["nsDetachRdmadev", "pkg/driver/rdmadevice.go", 52], ["nsDeleteSubinterface", "pkg/driver/subinterfaces.go", 225], ["needsRescanAfterDetach", "pkg/driver/nri_hooks.go", 495]],
+      tryIt: "# on the node\nip -br addr show eth1",
+      nodes: ["kubelet", "runtime", "nri", "store", "pod", "host"], edges: ["kubelet-runtime", "runtime-nri", "store-nri", "nri-pod"]
+    },
+    {
+      phase: "Release",
+      title: "The kubelet asks dranet to unprepare",
+      who: "kubelet → DRA hooks (gRPC NodeUnprepareResources) → PodConfigStore",
+      lead: "After the Pod has stopped, the kubelet calls NodeUnprepareResources for each claim.",
+      facts: [
+        "DHCP: send a DHCPRELEASE for the recorded lease. This is best effort, because the lease expires on its own.",
+        "Profile: call ReleaseProfileConfig, so a webhook or cloud profile provider can free its address.",
+        "Delete every Pod entry that references the claim, from bbolt and from memory. Memory is cleared even if the disk delete fails.",
+        "Errors in these releases are logged and do not block teardown."
+      ],
+      oke: "ReleaseProfileConfig has nothing to free. The child address is deterministic.",
+      code: [["UnprepareResourceClaims", "pkg/driver/dra_hooks.go", 517], ["unprepareResourceClaim", "pkg/driver/dra_hooks.go", 560], ["releaseDHCP", "pkg/driver/dhcp.go", 108], ["DeleteClaim", "pkg/driver/pod_device_config.go", 354], ["OKEInstance.ReleaseProfileConfig", "pkg/cloudprovider/oke/oke.go", 540]],
+      nodes: ["kubelet", "dra", "store", "inv", "prov"], edges: ["kubelet-dra", "dra-store", "dra-inv", "prov-inv"]
+    },
+    {
+      phase: "Release",
+      title: "The device is back in the pool",
+      who: "kernel → Inventory → Publisher → kube-apiserver → kube-scheduler",
+      lead: "The link event from the returned interface, or the explicit rescan, wakes the inventory. The next scan finds the interface with its netdev attributes, and the publisher writes a new ResourceSlice.",
+      facts: [
+        "Kubernetes clears the allocation when no Pod reserves the claim any more. A claim made from a template is deleted with its Pod.",
+        "The scheduler can then give the device to the next Pod. The cycle starts again at step 6."
+      ],
+      oke: "<code>rdma0</code> never left the host, so its netdev attributes stayed in the slice the whole time.",
+      code: [["DB.Run select loop", "pkg/inventory/db.go", 196], ["PublishResources", "pkg/driver/dra_hooks.go", 60]],
+      tryIt: "kubectl get resourceslices -o yaml",
+      nodes: ["host", "inv", "pub", "api", "sched"], edges: ["inv-host", "inv-pub", "pub-api", "sched-api"], tags: ["ResourceSlice"]
+    }
+  ];
+
+  /* Example interfaces. Each chip: key, label (short, in the diagram), text (state panel), cls. */
+  var SCN = {
+    generic: {
+      hostName: "eth1",
+      chips: {
+        dev: { label: "eth1", text: "192.168.10.5/24 · published as pci-0000-8a-00-0" },
+        up: { label: "eth0 (uplink)", text: "eth0 · 10.0.0.12/24 · default route, never published", code: "eth0", cls: "muted" },
+        rdma: { label: "mlx5_1", text: "RDMA device of eth1 (RoCE)", cls: "dev" },
+        lo: { label: "lo", text: "loopback" },
+        cni: { label: "eth0", text: "10.244.1.7/24 · set up by CNI" },
+        att: { label: "net1", text: "192.168.10.5/24 · was eth1 on the host" },
+        uv: { label: "uverbs1", text: "/dev/infiniband/uverbs1 in each container", cls: "dev" },
+        cm: { label: "rdma_cm", text: "/dev/infiniband/rdma_cm in each container", cls: "dev" }
+      }
+    },
+    oke: {
+      hostName: "rdma0",
+      chips: {
+        dev: { label: "rdma0", text: "10.224.0.25/12 (OCA) · published as pci-0000-0c-00-0" },
+        up: { label: "primary (uplink)", text: "primary VNIC · 10.0.64.25/18 · default route, never published", code: "primary", cls: "muted" },
+        rdma: { label: "mlx5_0", text: "RDMA device of rdma0, stays on the host (shared mode)", cls: "dev" },
+        lo: { label: "lo", text: "loopback" },
+        cni: { label: "eth0", text: "Pod IP · set up by CNI" },
+        att: { label: "rdma0 (IPvlan)", code: "rdma0", text: "IPvlan L2 child of host rdma0 · 10.208.0.25/12 · table 100, rule priority 32000" },
+        uv: { label: "uverbs0", text: "/dev/infiniband/uverbs0 in each container", cls: "dev" },
+        cm: { label: "rdma_cm", text: "/dev/infiniband/rdma_cm in each container", cls: "dev" }
+      }
+    }
+  };
+
+  /* Linux state per step (index 0..14). Marks: new, ghost, back, snap. */
+  function stateFor(i, scn) {
+    var oke = scn === "oke";
+    var s = { host: [["dev"], ["up"]], hostRdma: [["rdma"]], pod: null, podDev: [], link: null, podNote: "not created yet", notes: {} };
+    if (i === 7) {
+      s.host = [["dev", "snap"], ["up"]];
+      s.notes.dev = oke ? "profile resolved: child 10.208.0.25/12 · table 100" : "addresses, routes, rules, neighbors copied into the stored config";
+    }
+    if (i >= 8 && i <= 12) { s.pod = [["lo"], ["cni"]]; }
+    if (i >= 9 && i <= 11) {
+      s.pod.push(["att", i === 9 ? "new" : ""]);
+      if (oke) { s.link = "child"; s.notes.dev = "stays on the host as the IPvlan parent"; }
+      else { s.host = [["dev", "ghost"], ["up"]]; s.link = i === 9 ? "move" : null; s.notes.dev = "moved into the Pod as net1"; }
+    }
+    if (i === 10 || i === 11) { s.podDev = [["uv", i === 10 ? "new" : ""], ["cm", i === 10 ? "new" : ""]]; }
+    if (i === 12) {
+      s.pod.push(["att", "ghost"]);
+      if (oke) { s.notes.att = "child deleted"; }
+      else { s.host = [["dev", "back"], ["up"]]; s.link = "return"; s.notes.dev = "back on the host, no address"; s.notes.att = "moved back to the host as eth1"; }
+    }
+    if (i >= 13) { s.podNote = "removed by the runtime"; }
+    if (i === 13 && !oke) { s.notes.dev = "back on the host, no address"; }
+    if (i === 14) { s.host = [["dev", "back"], ["up"]]; s.notes.dev = oke ? "published again with the same attributes" : "published again (ifName, mac, ipv4 when set)"; }
+    return s;
+  }
+
+  var ALL_NODES = ["you", "api", "sched", "runtime", "kubelet", "nri", "store", "dra", "pub", "inv", "prov", "imds", "pod", "host"];
+  var ALL_EDGES = ["you-api", "sched-api", "kubelet-api", "pub-api", "nri-api", "kubelet-runtime", "runtime-nri", "kubelet-dra", "dra-store", "store-nri", "dra-inv", "inv-pub", "prov-inv", "prov-imds", "inv-host", "nri-pod"];
+  var ALL_TAGS = ["DeviceClass", "ResourceClaim", "ResourceSlice", "Pod"];
+  var SVGNS = "http://www.w3.org/2000/svg";
+
+  var cur = 0;
+  var scn = "oke";
+  var seen = {};
+  try { var saved = localStorage.getItem("dranet-walk-scn-v2"); if (saved === "oke" || saved === "generic") scn = saved; } catch (e) {}
+
+  function $(id) { return document.getElementById(id); }
+  function el(tag, attrs, text) {
+    var n = document.createElement(tag);
+    if (attrs) for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function sv(tag, attrs, text) {
+    var n = document.createElementNS(SVGNS, tag);
+    if (attrs) for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function buildRail() {
+    var rail = $("rail");
+    PHASES.forEach(function (p) {
+      var li = el("li", { "class": "phase", "data-phase": p });
+      li.appendChild(el("span", { "class": "phase-name" }, p));
+      var dots = el("div", { "class": "dots" });
+      STEPS.forEach(function (s, i) {
+        if (s.phase !== p) return;
+        var b = el("button", { type: "button", "class": "dot", "data-i": String(i), title: (i + 1) + ". " + s.title, "aria-label": "Step " + (i + 1) + ": " + s.title }, String(i + 1));
+        b.addEventListener("click", function () { go(i); });
+        dots.appendChild(b);
+      });
+      li.appendChild(dots);
+      rail.appendChild(li);
+    });
+  }
+
+  function chipWidth(label) { return Math.max(34, Math.round(16 + label.length * 7.55)); }
+
+  function drawRow(group, list, x0, y, pos) {
+    var x = x0;
+    list.forEach(function (item) {
+      var key = item[0], mark = item[1] || "";
+      var c = SCN[scn].chips[key];
+      var w = chipWidth(c.label);
+      var g = sv("g", { "class": ["chip", c.cls || "", mark].join(" ").trim() });
+      g.appendChild(sv("rect", { x: x, y: y, width: w, height: 24, rx: 6 }));
+      g.appendChild(sv("text", { x: x + 8, y: y + 16.5 }, c.label));
+      group.appendChild(g);
+      pos[key] = { x: x, w: w, y: y };
+      x += w + 7;
+    });
+  }
+
+  function renderChips(st) {
+    var pg = $("pod-chips"), hg = $("host-chips"), lg = $("link");
+    pg.textContent = ""; hg.textContent = ""; lg.textContent = "";
+    var pos = { pod: {}, host: {} };
+    drawRow(hg, st.host, 474, 536, pos.host);
+    drawRow(hg, st.hostRdma, 474, 566, pos.host);
+    var podBox = $("n-pod");
+    if (st.pod) {
+      podBox.classList.remove("absent");
+      drawRow(pg, st.pod, 54, 536, pos.pod);
+      drawRow(pg, st.podDev, 54, 566, pos.pod);
+    } else {
+      podBox.classList.add("absent");
+      pg.appendChild(sv("text", { "class": "ns-note", x: 54, y: 560 }, st.podNote));
+    }
+    if (st.link && pos.pod.att && pos.host.dev) {
+      var a = pos.pod.att, h = pos.host.dev;
+      var y = 548, left = a.x + a.w + 3, right = h.x - 3;
+      var g = sv("g", { "class": "transit" + (st.link === "child" ? " child" : "") });
+      var d = st.link === "return" ? "M" + (left + 2) + "," + y + " H" + (right - 1) : "M" + (right - 2) + "," + y + " H" + (left + 1);
+      g.appendChild(sv("path", { d: d }));
+      var label = st.link === "move" ? "moved into the Pod" : st.link === "return" ? "moved back to the host" : "IPvlan child of host " + SCN[scn].hostName;
+      g.appendChild(sv("text", { x: (left + right) / 2, y: y - 6 }, label));
+      lg.appendChild(g);
+    }
+  }
+
+  function renderState(st) {
+    var box = $("state");
+    box.textContent = "";
+    var chips = SCN[scn].chips;
+    function col(title, list, extra, empty) {
+      var d = el("div", { "class": "ns-col" });
+      d.appendChild(el("h3", null, title));
+      if (!list) { d.appendChild(el("p", { "class": "none" }, empty)); return d; }
+      var ul = el("ul");
+      list.concat(extra || []).forEach(function (item) {
+        var key = item[0], mark = item[1] || "";
+        var c = chips[key];
+        var li = el("li", { "class": mark });
+        li.appendChild(el("code", null, c.code || c.label));
+        var note = st.notes[key] || c.text;
+        li.appendChild(el("span", null, note));
+        var badge = { "new": ["new", "new"], ghost: ["gone", "gone"], back: ["back", "back"], snap: ["new", "read by Prepare"] }[mark];
+        if (badge) li.appendChild(el("span", { "class": "badge " + badge[0] }, badge[1]));
+        ul.appendChild(li);
+      });
+      d.appendChild(ul);
+      return d;
+    }
+    box.appendChild(col("Host netns", st.host, st.hostRdma));
+    box.appendChild(col("Pod netns", st.pod, st.podDev, st.podNote === "not created yet" ? "Not created yet. The runtime creates it in step 9." : "Removed by the runtime after StopPodSandbox."));
+    box.appendChild(el("p", { "class": "state-note" }, "Linux state after this step. Example values for the \"" + (scn === "oke" ? "OKE RDMA NIC" : "Passthrough NIC") + "\" node."));
+  }
+
+  function renderCard(s, i) {
+    var c = $("card");
+    c.textContent = "";
+    var head = el("div", { "class": "card-head" });
+    head.appendChild(el("span", { "class": "card-phase" }, s.phase));
+    head.appendChild(el("span", { "class": "card-num" }, "Step " + (i + 1) + " of " + STEPS.length));
+    c.appendChild(head);
+    c.appendChild(el("h3", null, s.title));
+    c.appendChild(el("p", { "class": "who" }, s.who));
+    var lead = el("p", { "class": "lead" }); lead.innerHTML = s.lead; c.appendChild(lead);
+    var ul = el("ul", { "class": "facts" });
+    s.facts.forEach(function (f) { var li = el("li"); li.innerHTML = f; ul.appendChild(li); });
+    c.appendChild(ul);
+    var okeBox = null;
+    if (s.oke) {
+      okeBox = el("div", { "class": "oke" + (scn === "oke" ? " hot" : "") });
+      okeBox.appendChild(el("span", { "class": "oke-tag" }, "On OKE"));
+      var p = el("p"); p.innerHTML = s.oke; okeBox.appendChild(p);
+      if (scn === "oke") c.appendChild(okeBox);
+    }
+    if (s.sample) {
+      var sb = el("div", { "class": "block" });
+      sb.appendChild(el("h4", null, s.sample === "slice" ? "Published slice (trimmed)" : s.sample === "request" ? "What you apply" : "Claim status written by dranet"));
+      sb.appendChild(el("pre", null, SAMPLES[s.sample][scn]));
+      c.appendChild(sb);
+    }
+    var cb = el("div", { "class": "block" });
+    cb.appendChild(el("h4", null, "Code"));
+    var refs = el("ul", { "class": "refs" });
+    s.code.forEach(function (r) {
+      var li = el("li");
+      li.appendChild(el("span", { "class": "fn" }, r[0]));
+      var a = el("a", { href: GH + r[1] + "#L" + r[2], target: "_blank", rel: "noopener" }, r[1] + ":" + r[2]);
+      li.appendChild(a);
+      refs.appendChild(li);
+    });
+    cb.appendChild(refs);
+    c.appendChild(cb);
+    if (s.tryIt) {
+      var tb = el("div", { "class": "block" });
+      tb.appendChild(el("h4", null, "Check it"));
+      tb.appendChild(el("pre", null, s.tryIt));
+      c.appendChild(tb);
+    }
+    if (okeBox && scn !== "oke") c.appendChild(okeBox);
+  }
+
+  function renderMap(s) {
+    ALL_NODES.forEach(function (n) {
+      var g = $("n-" + n); if (!g) return;
+      var on = (s.nodes || []).indexOf(n) >= 0;
+      g.classList.toggle("on", on);
+      g.classList.toggle("dim", !on);
+    });
+    ALL_EDGES.forEach(function (e) {
+      var g = $("e-" + e); if (!g) return;
+      var on = (s.edges || []).indexOf(e) >= 0;
+      g.classList.toggle("on", on);
+      g.classList.toggle("dim", !on);
+    });
+    ALL_TAGS.forEach(function (t) {
+      var g = $("t-" + t); if (!g) return;
+      g.classList.toggle("on", (s.tags || []).indexOf(t) >= 0);
+    });
+    var api = $("n-api");
+    if ((s.tags || []).length) { api.classList.remove("dim"); }
+    $("g-dranet").classList.toggle("on", !!s.group);
+  }
+
+  function render() {
+    var s = STEPS[cur];
+    seen[cur] = true;
+    renderMap(s);
+    var st = stateFor(cur, scn);
+    renderChips(st);
+    renderState(st);
+    renderCard(s, cur);
+    $("counter").textContent = (cur + 1) + " / " + STEPS.length;
+    $("prev").disabled = cur === 0;
+    $("next").disabled = cur === STEPS.length - 1;
+    document.querySelectorAll(".dot").forEach(function (d) {
+      var i = Number(d.getAttribute("data-i"));
+      if (i === cur) d.setAttribute("aria-current", "step"); else d.removeAttribute("aria-current");
+      d.classList.toggle("seen", !!seen[i] && i !== cur);
+    });
+    document.querySelectorAll(".phase").forEach(function (p) {
+      p.classList.toggle("current", p.getAttribute("data-phase") === s.phase);
+    });
+    ["generic", "oke"].forEach(function (k) { $("scn-" + k).setAttribute("aria-checked", String(k === scn)); });
+  }
+
+  function go(i) {
+    cur = Math.max(0, Math.min(STEPS.length - 1, i));
+    render();
+    try { history.replaceState(null, "", "#step-" + (cur + 1)); } catch (e) {}
+  }
+
+  function setScn(k) {
+    scn = k;
+    try { localStorage.setItem("dranet-walk-scn-v2", k); } catch (e) {}
+    render();
+  }
+
+  buildRail();
+  $("prev").addEventListener("click", function () { go(cur - 1); });
+  $("next").addEventListener("click", function () { go(cur + 1); });
+  $("scn-generic").addEventListener("click", function () { setScn("generic"); });
+  $("scn-oke").addEventListener("click", function () { setScn("oke"); });
+  document.addEventListener("keydown", function (e) {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    var t = e.target && e.target.tagName;
+    if (t === "INPUT" || t === "TEXTAREA" || t === "SELECT") return;
+    if (e.key === "ArrowRight") { go(cur + 1); e.preventDefault(); }
+    else if (e.key === "ArrowLeft") { go(cur - 1); e.preventDefault(); }
+  });
+  var m = /^#step-(\d+)$/.exec(location.hash || "");
+  if (m) cur = Math.max(0, Math.min(STEPS.length - 1, Number(m[1]) - 1));
+  render();
+})();
+</script>
+</body>
+</html>
