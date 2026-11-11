@@ -1045,7 +1045,10 @@ footer { border-top: 3px dotted var(--line-strong); }
       phase: "Release",
       title: "The device is back in the pool",
       who: "kernel → Inventory → Publisher → kube-apiserver → kube-scheduler",
-      leadOke: "Nothing returns to the host, because <code>rdma0</code> never left it. Kubernetes releases the allocation, and the NIC is free for the next claim.",
+      titleOke: "The NIC is free for the next claim",
+      whoOke: "kube-apiserver → kube-scheduler",
+      leadOke: "Nothing returns to the host, because <code>rdma0</code> never left it. When Kubernetes releases the allocation, the scheduler can give the NIC to the next Pod.",
+      mapOke: { nodes: ["api", "sched"], edges: ["sched-api"], tags: ["ResourceClaim", "ResourceSlice"] },
       lead: "The link event from the returned interface, or the explicit rescan, wakes the inventory. The next scan finds the interface with its netdev attributes, and the publisher writes a new ResourceSlice.",
       facts: [
         "Kubernetes clears the allocation when no Pod reserves the claim any more. A claim made from a template is deleted with its Pod.",
@@ -1234,8 +1237,8 @@ footer { border-top: 3px dotted var(--line-strong); }
     head.appendChild(el("span", { "class": "card-phase" }, s.phase));
     head.appendChild(el("span", { "class": "card-num" }, "Step " + (i + 1) + " of " + STEPS.length));
     c.appendChild(head);
-    c.appendChild(el("h3", null, s.title));
-    c.appendChild(el("p", { "class": "who" }, s.who));
+    c.appendChild(el("h3", null, (scn === "oke" && s.titleOke) || s.title));
+    c.appendChild(el("p", { "class": "who" }, (scn === "oke" && s.whoOke) || s.who));
     var lead = el("p", { "class": "lead" }); lead.innerHTML = (scn === "oke" && s.leadOke) || s.lead; c.appendChild(lead);
     var ul = el("ul", { "class": "facts" });
     s.facts.forEach(function (f) { var li = el("li"); li.innerHTML = f; ul.appendChild(li); });
@@ -1299,7 +1302,7 @@ footer { border-top: 3px dotted var(--line-strong); }
   function render() {
     var s = STEPS[cur];
     seen[cur] = true;
-    renderMap(s);
+    renderMap((scn === "oke" && s.mapOke) || s);
     var st = stateFor(cur, scn);
     renderChips(st);
     renderState(st);
