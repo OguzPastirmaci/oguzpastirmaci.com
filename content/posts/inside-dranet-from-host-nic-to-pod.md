@@ -38,5 +38,3 @@ A switch at the top of the page selects the example.
 Each step names the Go functions that do the work and links to them on GitHub. The page is pinned to one Dranet release, currently v1.5.0, so the links and line numbers stay correct. I plan to update it when a new release ships.
 
 The sections below the player cover a few topics that cut across the steps. They show where the applied configuration comes from, how the two attach types differ, what the RDMA namespace modes change, and what happens on a restart.
-
-If you find something wrong on the page, please tell me on [LinkedIn](https://www.linkedin.com/in/oguzpastirmaci/).
