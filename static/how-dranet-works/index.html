@@ -377,6 +377,7 @@ footer { border-top: 3px dotted var(--line-strong); }
 .cmp .chip.new { fill: var(--accent); }
 .cmp .chip.new + text { fill: var(--on-accent); }
 </style>
+<script data-goatcounter="https://oguzpastirmaci.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
 </head>
 <body>
 <div class="site-header wrap">
@@ -509,11 +510,11 @@ footer { border-top: 3px dotted var(--line-strong); }
 
   <section class="ref" id="config">
     <h2>Where the applied config comes from</h2>
-    <p>Prepare turns several inputs into one stored DeviceConfig. The order matters, because each stage can override or extend the one before it.</p>
+    <p>Prepare turns several inputs into one stored DeviceConfig. On a conflict, your config wins, then the provider config, then the profile. A later stage only fills fields that are not set and adds list entries.</p>
     <ol class="pipeline">
       <li>
         <h3>Pick one opaque config</h3>
-        <p>From <code>status.allocation.devices.config</code>, keep entries for driver <code>dra.net</code> that match the request. Kubernetes lists DeviceClass entries before claim entries. The first valid entry wins. The others are not merged.</p>
+        <p>From <code>status.allocation.devices.config</code>, keep entries for driver <code>dra.net</code> that match the request. Kubernetes lists DeviceClass entries before claim entries. The first non-empty entry is used, and later entries are not read. An invalid entry before it fails the claim.</p>
         <span class="where"><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/driver/dra_hooks.go#L241" target="_blank" rel="noopener">dra_hooks.go:241</a></span>
       </li>
       <li>
@@ -523,7 +524,7 @@ footer { border-top: 3px dotted var(--line-strong); }
       </li>
       <li>
         <h3>Resolve the profile</h3>
-        <p>If the result names a <code>profile</code>, the profile provider (cloud or webhook) returns more config, which is merged on top. Without a profile provider, the inventory drops a profile that the cloud provider advertised.</p>
+        <p>If the result names a <code>profile</code>, the profile provider (cloud or webhook) returns more config. It fills fields that are still not set and adds list entries. Without a profile provider, the inventory drops a profile that the cloud provider advertised.</p>
         <span class="where"><a href="https://github.com/kubernetes-sigs/dranet/blob/v1.5.0/pkg/driver/dra_hooks.go#L772" target="_blank" rel="noopener">dra_hooks.go:772</a></span>
       </li>
       <li>
@@ -604,7 +605,7 @@ footer { border-top: 3px dotted var(--line-strong); }
       <table>
         <thead><tr><th scope="col"></th><th scope="col">Shared (<code>ib_core netns_mode=1</code>)</th><th scope="col">Exclusive (<code>netns_mode=0</code>)</th></tr></thead>
         <tbody>
-          <tr><th scope="row">Device files (<code>uverbsN</code>, <code>rdma_cm</code>)</th><td>Added to every container of the Pod</td><td>Added to every container of the Pod</td></tr>
+          <tr><th scope="row">Device files (<code>rdma_cm</code>, <code>uverbsN</code>, and <code>umadN</code>, <code>issmN</code>, <code>ucmN</code> when present)</th><td>Added to every container of the Pod</td><td>Added to every container of the Pod</td></tr>
           <tr><th scope="row">Netdev</th><td>Moved (passthrough) or IPvlan child</td><td>Moved (passthrough). IPvlan claims fail at Prepare.</td></tr>
           <tr><th scope="row">RDMA link device (<code>mlx5_N</code>)</th><td>Stays on the host, shared by all namespaces</td><td>Moved into the Pod. On stop it returns before the netdev.</td></tr>
           <tr><th scope="row">RDMA-only device (no netdev)</th><td>Device files only. Condition <code>Ready</code> (<code>RDMAOnlyDeviceReady</code>).</td><td>RDMA link moved. Conditions <code>RDMALinkReady</code> and <code>Ready</code>.</td></tr>
@@ -685,7 +686,7 @@ footer { border-top: 3px dotted var(--line-strong); }
         "  - name: pci-0000-8a-00-0",
         "    attributes:",
         "      dra.net/ifName:     {string: eth1}",
-        "      dra.net/ipv4:       {string: 192.168.10.5}",
+        "      dra.net/ipv4:       {string: 192.168.10.5/24}",
         "      dra.net/rdma:       {bool: true}",
         "      dra.net/rdmaDevice: {string: mlx5_1}",
         "      dra.net/numaNode:   {int: 1}"
@@ -701,7 +702,7 @@ footer { border-top: 3px dotted var(--line-strong); }
         "  - name: pci-0000-0c-00-0",
         "    attributes:",
         "      dra.net/ifName:      {string: rdma0}",
-        "      dra.net/ipv4:        {string: 10.224.0.25}",
+        "      dra.net/ipv4:        {string: 10.224.0.25/12}",
         "      dra.net/rdma:        {bool: true}",
         "      dra.net/rdmaDevice:  {string: mlx5_0}",
         "      oke.dra.net/shape:   {string: BM.GPU.H100.8}",
@@ -752,6 +753,7 @@ footer { border-top: 3px dotted var(--line-strong); }
         "      expression: >-",
         "        device.driver == \"dra.net\" &&",
         "        device.attributes[\"dra.net\"].rdma &&",
+        "        has(device.attributes[\"dra.net\"].ifName) &&",
         "        device.attributes[\"dra.net\"].ifName.startsWith(\"rdma\")",
         "---",
         "apiVersion: resource.k8s.io/v1",
@@ -826,7 +828,7 @@ footer { border-top: 3px dotted var(--line-strong); }
       phase: "Boot",
       title: "The process wires itself up",
       who: "dranet main()",
-      lead: "<code>main()</code> builds the parts in a fixed order. <code>/healthz</code> returns 503 until the last part is up.",
+      lead: "<code>main()</code> builds the parts in a fixed order. <code>/healthz</code> returns 503 until the driver has started and the kubelet has registered it. Discovery and publishing continue in the background.",
       facts: [
         "Parse flags and feature gates. Serve <code>/healthz</code> and <code>/metrics</code> on port 9177.",
         "Open the PodConfigStore. With <code>--db-path</code> (default <code>/var/run/dranet/dranet.db</code>) it reloads every stored device config from the bbolt file, so claims prepared before a restart are still known.",
@@ -834,7 +836,7 @@ footer { border-top: 3px dotted var(--line-strong); }
         "Pick a cloud provider. The probes run in this order: GCE, AWS, Azure, OKE, Alibaba, CoreWeave, webhook. The first match wins. <code>--cloud-provider-hint</code> skips the probes. <code>--cloud-provider-options</code> passes <code>&lt;provider&gt;.&lt;option&gt;=&lt;value&gt;</code> settings to a provider, and an invalid option stops startup.",
         "Build the inventory, call <code>driver.Start</code>, then mark the process ready."
       ],
-      oke: "The OKE provider reads the Oracle Cloud Agent RDMA files once (<code>rdma_network.json</code>, default network <code>10.224.0.0/12</code>). It polls IMDS at <code>169.254.169.254/opc/v2</code> for up to 15 s, then refreshes every 5 min in the background. If IMDS is late, startup continues and the refresh loop retries.",
+      oke: "The OKE provider reads the Oracle Cloud Agent RDMA files once, if their directory is mounted into the dranet pod. The default install does not mount it, so the defaults apply (network <code>10.224.0.0/12</code>, classic address mode). It polls IMDS at <code>169.254.169.254/opc/v2</code> for up to 15 s, then refreshes every 5 min in the background. If IMDS is late, startup continues and the refresh loop retries.",
       code: [["main", "cmd/dranet/app.go", 101], ["NewPodConfigStore", "pkg/driver/pod_device_config.go", 162], ["setupProviders", "cmd/dranet/app.go", 302], ["cloudProviderProbes", "pkg/cloudprovider/discovery/discovery.go", 73], ["OKEInstance.start", "pkg/cloudprovider/oke/oke.go", 981]],
       tryIt: "kubectl -n kube-system logs ds/dranet | head -40",
       nodes: ["store", "prov", "imds"], edges: ["prov-imds"], group: true
@@ -849,7 +851,7 @@ footer { border-top: 3px dotted var(--line-strong); }
         "Start the kubelet plugin: registration socket <code>dra.net-reg.sock</code> in <code>plugins_registry</code>, gRPC socket <code>dra.sock</code> in <code>plugins/dra.net</code>. Wait up to 30 s for the kubelet to confirm.",
         "Start an NRI plugin named <code>dra.net</code> with index <code>00</code>. It receives RunPodSandbox, StopPodSandbox, RemovePodSandbox, CreateContainer, and a Synchronize list of running Pods.",
         "In Synchronize, dranet records the netns path again for each stored Pod that still runs.",
-        "Start the inventory loop and the publisher. The NRI plugin and the inventory restart up to 5 times, then the process exits."
+        "Start the inventory loop and the publisher. The NRI plugin and the inventory get 5 runs in total. After the last one fails, the process exits."
       ],
       oke: null,
       code: [["Start", "pkg/driver/driver.go", 123], ["kubeletplugin.Start", "pkg/driver/driver.go", 171], ["stub.New (NRI)", "pkg/driver/driver.go", 197], ["Synchronize", "pkg/driver/nri_hooks.go", 43]],
@@ -863,7 +865,7 @@ footer { border-top: 3px dotted var(--line-strong); }
       lead: "The inventory builds one device list from three sources and keeps it current while the node runs.",
       facts: [
         "PCI: network-class devices with a kernel driver bound (not <code>vfio-pci</code> and similar). The name is <code>pci-</code> plus the address, for example <code>pci-0000-8a-00-0</code>.",
-        "RDMA devices that the PCI pass missed, for example eRDMA or InfiniBand-only devices.",
+        "RDMA devices that the PCI pass missed, for example eRDMA.",
         "netlink links: a link with a PCI address joins its PCI device. Other links, for example bonds, become their own device. Loopback, <code>docker0</code>, and Cilium links are skipped.",
         "Attributes include <code>dra.net/ifName</code>, <code>mac</code>, <code>mtu</code>, <code>ipv4</code>, <code>rdma</code>, <code>rdmaDevice</code>, <code>pciAddress</code>, <code>numaNode</code>, and <code>sriov</code>, plus <code>resource.kubernetes.io/pcieRoot</code> for alignment with GPUs.",
         "The provider adds cloud attributes and a per-device config. The default-route uplink and its children are removed, so the node keeps its own connectivity.",
@@ -901,7 +903,7 @@ footer { border-top: 3px dotted var(--line-strong); }
         "<strong>ResourceClaim</strong> or <strong>ResourceClaimTemplate</strong>: how many devices, extra selectors, and optional opaque config for <code>dra.net</code>.",
         "<strong>Pod</strong>: lists the claim under <code>spec.resourceClaims</code>.",
         "The opaque parameters are a dranet NetworkConfig: <code>interface</code> (name, addresses, mtu, type, vrf, and more), <code>routes</code>, <code>rules</code>, <code>neighbors</code>, <code>ethtool</code>, <code>profile</code>. Unknown fields are errors.",
-        "Config can sit in the DeviceClass or in the claim. Kubernetes lists class entries first. dranet uses the first valid entry for the request and ignores the others."
+        "Config can sit in the DeviceClass or in the claim. Kubernetes lists class entries first. dranet uses the first non-empty entry for the request and does not read the later ones. An invalid entry before it fails the claim."
       ],
       oke: "Do not set <code>interface.addresses</code>, DHCP, Unnumbered, or <code>type: Passthrough</code>. The <code>oke-rdma</code> profile assigns the address and rejects those settings.",
       code: [["NetworkConfig", "pkg/apis/types.go", 21], ["ValidateConfig", "pkg/apis/validation.go", 44], ["config selection", "pkg/driver/dra_hooks.go", 241], ["validateOKEProfileRequest", "pkg/cloudprovider/oke/oke.go", 590]],
@@ -931,10 +933,10 @@ footer { border-top: 3px dotted var(--line-strong); }
       lead: "The kubelet calls NodePrepareResources before it creates the Pod sandbox. dranet does all slow work here, because the later NRI hook runs inside sandbox creation and must return fast.",
       facts: [
         "Check <code>reservedFor</code>: exactly one Pod. Skip devices of other drivers. Skip a device that is already prepared for this Pod, so a retry is safe.",
-        "Resolve the config: the first valid <code>dra.net</code> entry, merged onto the provider config, plus the profile result, then validated again.",
+        "Resolve the config: the first non-empty <code>dra.net</code> entry, then the provider config, then the profile result, each filling only what is not set yet. The result is validated again.",
         "Snapshot what must follow the interface: global addresses (unless the config sets addresses or DHCP), its routes except the local table, the rules for those tables, and permanent neighbor entries.",
         "Optional work: a DHCP request on the host interface (5 s timeout, the result is only recorded), ethtool feature names mapped to kernel names, a VF MTU check against its PF, and eBPF programs unpinned.",
-        "RDMA: find the RDMA device (for example <code>mlx5_1</code>) and its device files <code>uverbsN</code> and <code>rdma_cm</code>.",
+        "RDMA: find the RDMA device (for example <code>mlx5_1</code>) and its device files: <code>rdma_cm</code>, <code>uverbsN</code>, and <code>umadN</code>, <code>issmN</code>, and <code>ucmN</code> when the node has them.",
         "Save one DeviceConfig per Pod and device. The bbolt file is written first, then memory.",
         "On error the claim gets a <code>ClaimPrepareFailed</code> Event, the Pod stays in ContainerCreating, and the kubelet retries."
       ],
@@ -982,12 +984,12 @@ footer { border-top: 3px dotted var(--line-strong); }
       who: "runtime → NRI hooks",
       lead: "For each container, the runtime asks NRI plugins for adjustments. dranet adds the RDMA device files of the Pod's devices.",
       facts: [
-        "It adds <code>/dev/infiniband/rdma_cm</code> and <code>/dev/infiniband/uverbsN</code>, each once, with the type and major/minor numbers read on the host.",
+        "It adds <code>/dev/infiniband/rdma_cm</code> and <code>/dev/infiniband/uverbsN</code>, each once, with the type and major/minor numbers read on the host. It also adds the <code>umadN</code>, <code>issmN</code>, and <code>ucmN</code> files of the device when the node has them.",
         "Every container in the Pod gets them, not only one container.",
         "A device without RDMA adds nothing.",
         "The hook records the time of this NRI activity. Graceful shutdown uses it."
       ],
-      oke: "The containers get <code>/dev/infiniband/uverbs0</code> and <code>rdma_cm</code> for <code>mlx5_0</code>. RDMA traffic uses the child address through the shared host RDMA device.",
+      oke: "The containers get <code>/dev/infiniband/uverbs0</code> and <code>rdma_cm</code> for <code>mlx5_0</code>, plus <code>umad0</code> and <code>issm0</code> when the node has them. RDMA traffic uses the child address through the shared host RDMA device.",
       code: [["CreateContainer", "pkg/driver/nri_hooks.go", 67], ["createContainer", "pkg/driver/nri_hooks.go", 97], ["buildRDMAConfig", "pkg/driver/dra_hooks.go", 625]],
       nodes: ["runtime", "nri", "store", "pod"], edges: ["runtime-nri", "store-nri"]
     },
@@ -1043,6 +1045,7 @@ footer { border-top: 3px dotted var(--line-strong); }
       phase: "Release",
       title: "The device is back in the pool",
       who: "kernel → Inventory → Publisher → kube-apiserver → kube-scheduler",
+      leadOke: "Nothing returns to the host, because <code>rdma0</code> never left it. Kubernetes releases the allocation, and the NIC is free for the next claim.",
       lead: "The link event from the returned interface, or the explicit rescan, wakes the inventory. The next scan finds the interface with its netdev attributes, and the publisher writes a new ResourceSlice.",
       facts: [
         "Kubernetes clears the allocation when no Pod reserves the claim any more. A claim made from a template is deleted with its Pod.",
@@ -1107,7 +1110,7 @@ footer { border-top: 3px dotted var(--line-strong); }
     }
     if (i >= 13) { s.podNote = "removed by the runtime"; }
     if (i === 13 && !oke) { s.notes.dev = "back on the host, no address"; }
-    if (i === 14) { s.host = [["dev", "back"], ["up"]]; s.notes.dev = oke ? "published again with the same attributes" : "published again (ifName, mac, ipv4 when set)"; }
+    if (i === 14) { if (oke) { s.notes.dev = "still published, free for the next claim"; } else { s.host = [["dev", "back"], ["up"]]; s.notes.dev = "published again (ifName, mac, ipv4 when set)"; } }
     return s;
   }
 
@@ -1233,7 +1236,7 @@ footer { border-top: 3px dotted var(--line-strong); }
     c.appendChild(head);
     c.appendChild(el("h3", null, s.title));
     c.appendChild(el("p", { "class": "who" }, s.who));
-    var lead = el("p", { "class": "lead" }); lead.innerHTML = s.lead; c.appendChild(lead);
+    var lead = el("p", { "class": "lead" }); lead.innerHTML = (scn === "oke" && s.leadOke) || s.lead; c.appendChild(lead);
     var ul = el("ul", { "class": "facts" });
     s.facts.forEach(function (f) { var li = el("li"); li.innerHTML = f; ul.appendChild(li); });
     c.appendChild(ul);
@@ -1333,11 +1336,20 @@ footer { border-top: 3px dotted var(--line-strong); }
   $("scn-generic").addEventListener("click", function () { setScn("generic"); });
   $("scn-oke").addEventListener("click", function () { setScn("oke"); });
   document.addEventListener("keydown", function (e) {
-    if (e.altKey || e.ctrlKey || e.metaKey) return;
-    var t = e.target && e.target.tagName;
-    if (t === "INPUT" || t === "TEXTAREA" || t === "SELECT") return;
-    if (e.key === "ArrowRight") { go(cur + 1); e.preventDefault(); }
-    else if (e.key === "ArrowLeft") { go(cur - 1); e.preventDefault(); }
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    // Step with the arrow keys only when focus is in the player, or nowhere.
+    var a = document.activeElement;
+    if (a && a !== document.body && !$("walkthrough").contains(a)) return;
+    if (a && a.getAttribute("role") === "radio") {
+      var other = a.id === "scn-oke" ? "generic" : "oke";
+      setScn(other);
+      $("scn-" + other).focus();
+      e.preventDefault();
+      return;
+    }
+    go(cur + (e.key === "ArrowRight" ? 1 : -1));
+    e.preventDefault();
   });
   var m = /^#step-(\d+)$/.exec(location.hash || "");
   if (m) cur = Math.max(0, Math.min(STEPS.length - 1, Number(m[1]) - 1));
