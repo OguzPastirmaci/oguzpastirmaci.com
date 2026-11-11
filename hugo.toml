@@ -11,7 +11,7 @@ enableRobotsTXT = true
 
 [params]
   contentTypeName = "posts"
-  showMenuItems = 4
+  showMenuItems = 3
   fullWidthTheme = false
   centerTheme = true
   subtitle = "Notes on GPUs, RDMA and Kubernetes."
@@ -33,18 +33,12 @@ enableRobotsTXT = true
   url = "/about/"
   weight = 1
 
-[[menu.main]]
-  identifier = "how-dranet-works"
-  name = "How dranet works"
-  url = "/how-dranet-works/"
-  weight = 2
-
 # Header links, opened in a new tab.
 [[menu.main]]
   identifier = "linkedin"
   name = "LinkedIn"
   url = "https://www.linkedin.com/in/oguzpastirmaci/"
-  weight = 3
+  weight = 2
   [menu.main.params]
     newTab = true
 
@@ -52,6 +46,6 @@ enableRobotsTXT = true
   identifier = "github"
   name = "GitHub"
   url = "https://github.com/OguzPastirmaci"
-  weight = 4
+  weight = 3
   [menu.main.params]
     newTab = true
