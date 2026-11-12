@@ -42,12 +42,12 @@ The node configuration already sets `arp_ignore=1`, `arp_announce=2` and `rp_fil
 
 I started with a plain pod and added one setting at a time. Each step ran one pod on each node. This is the step with all the settings:
 
-{{< code language="yaml" title="step4-privileged.yaml" open="false" >}}
+{{< code language="yaml" title="rdma-probe-privileged.yaml" open="false" >}}
 ---
 apiVersion: v1
 kind: Pod
 metadata:
-  name: step4-privileged-n1
+  name: rdma-probe-privileged-n1
   namespace: rdma-hostnet
 spec:
   hostNetwork: true
@@ -70,7 +70,7 @@ spec:
 apiVersion: v1
 kind: Pod
 metadata:
-  name: step4-privileged-n2
+  name: rdma-probe-privileged-n2
   namespace: rdma-hostnet
 spec:
   hostNetwork: true
@@ -155,7 +155,7 @@ resolv.conf: search vsqvvr.oraclevcn.com nameserver 169.254.169.254
 The pod on the pod network had its own name and the cluster DNS:
 
 ```
-hostname: step1-pod-network-n1
+hostname: rdma-probe-pod-network-n1
 resolv.conf: search rdma-hostnet.svc.cluster.local svc.cluster.local cluster.local vsqvvr.oraclevcn.com nameserver 10.96.5.5
 ```
 
@@ -163,15 +163,15 @@ With the DNS settings of the node, the pod cannot resolve cluster names. In a `h
 
 ## The rails
 
-Before NCCL, I tested each rail with `ib_write_bw` between the two `step4` pods:
+Before NCCL, I tested each rail with `ib_write_bw` between the two probe pods:
 
 {{< code language="bash" title="rails.sh" open="false" >}}
 #!/bin/bash
-# ib_write_bw on each rail, from the step4 pod on node one to the step4 pod on node two.
+# ib_write_bw on each rail, from the probe pod on node one to the probe pod on node two.
 set -u
 ns=rdma-hostnet
-srv=step4-privileged-n2
-cli=step4-privileged-n1
+srv=rdma-probe-privileged-n2
+cli=rdma-probe-privileged-n1
 port=18515
 for i in $(seq 0 15); do
   dev=$(kubectl -n $ns exec $srv -- ls "/sys/class/net/rdma$i/device/infiniband")
@@ -612,10 +612,10 @@ The fix has limits. It needs a change on the nodes, and it only works with CRI-O
 
 ### Pod Security
 
-The Baseline Pod Security Standard does not allow any of the settings that make this work. I applied the `step4` pod in a namespace with `pod-security.kubernetes.io/enforce: baseline`:
+The Baseline Pod Security Standard does not allow any of the settings that make this work. I applied the probe pod in a namespace with `pod-security.kubernetes.io/enforce: baseline`:
 
 ```
-Error from server (Forbidden): error when creating "psa-pod.yaml": pods "step4-privileged-n1" is forbidden: violates PodSecurity "baseline:latest": host namespaces (hostNetwork=true), hostPath volumes (volume "dev-infiniband"), privileged (container "rdma" must not set securityContext.privileged=true)
+Error from server (Forbidden): error when creating "psa-pod.yaml": pods "rdma-probe-privileged-n1" is forbidden: violates PodSecurity "baseline:latest": host namespaces (hostNetwork=true), hostPath volumes (volume "dev-infiniband"), privileged (container "rdma" must not set securityContext.privileged=true)
 ```
 
 The pod from the fix does not use `privileged` or `hostPath`. Baseline still rejects it:
