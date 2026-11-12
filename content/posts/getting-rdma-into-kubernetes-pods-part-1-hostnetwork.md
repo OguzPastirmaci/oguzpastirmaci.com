@@ -610,7 +610,7 @@ Each job got its own 4 GPUs, and NCCL picked the NICs closest to them. So the tw
 
 The handler also has `privileged_without_host_devices = true`. So CRI-O does not add the devices of the node to a privileged pod on it. I tested that setting first, without the annotation. A privileged pod with the `hostPath` mount got only its own 4 GPUs. But RDMA failed again with `Failed to open device`. CRI-O did not lift the device cgroup limit for it. With the annotation, a privileged pod on this handler also worked.
 
-The fix has limits. It needs a change on the nodes, and it only works with CRI-O. The device list also depends on the node. These nodes have 18 RDMA devices, including the two front-end NICs. Any pod can name the RuntimeClass and set the annotation, and Pod Security checks neither.
+The fix has limits. It needs a change on the nodes, and it only works with CRI-O. The device list also depends on the node. These nodes have 18 RDMA devices, including the two front-end NICs. Any pod can name the RuntimeClass and set the annotation, and Pod Security checks neither. So I do not recommend this fix in general.
 
 ### Pod Security
 
