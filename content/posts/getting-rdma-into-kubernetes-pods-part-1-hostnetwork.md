@@ -38,6 +38,8 @@ These results are for a single plane network with IPv4 rails, like the one these
 
 The node configuration already sets `arp_ignore=1`, `arp_announce=2` and `rp_filter=0` on every rail. The ARP post explains which of these values matter.
 
+All test pods and jobs ran in a namespace named `rdma-hostnet`, which I created first.
+
 ## What the pod needs
 
 I started with a plain pod and added one setting at a time. Each step ran one pod on each node. This is the step with all the settings:
