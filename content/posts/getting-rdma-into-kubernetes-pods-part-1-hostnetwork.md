@@ -20,7 +20,7 @@ This first part covers `hostNetwork`. It is the simplest way, and it gets the fu
 
 Earlier posts cover some parts of this topic, so this post links to them:
 
-- [Why torchrun Can't Find Node Two on the Host Network](/posts/why-torchrun-cant-find-node-two-on-the-host-network/) covers the host name trap with PyTorch.
+- [Why torchrun Can't Find Node Two on the Host Network](/posts/why-torchrun-cant-find-node-two-on-the-host-network/) covers the host name problem with PyTorch.
 - [ARP, rp_filter and accept_ra for RDMA Pods on Kubernetes](/posts/arp-rp-filter-and-accept-ra-for-rdma-pods-on-kubernetes/) covers the sysctls of the rails.
 - [Why Pods See Zero RoCE GIDs on DOCA-OFED](/posts/why-pods-see-zero-roce-gids-on-doca-ofed/) covers why a pod off the host network needs its own netdevs.
 
