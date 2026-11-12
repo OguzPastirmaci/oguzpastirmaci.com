@@ -139,7 +139,7 @@ The device cgroup of the container blocks it. A container can only open the devi
 
 `privileged` removes that limit, and it also adds every device of the node to the container. That is why the last row works without the `hostPath` mount. It has 37 files, the 18 `uverbs` devices, the 18 `umad` devices and `rdma_cm`. The `hostPath` mount also brings the `by-ibdev` and `by-path` directories. CRI-O does this because `privileged_without_host_devices` is `false`, the default. Keep this in mind, because it matters again in the GPU section.
 
-The pod also has to lock memory, because RDMA pins the buffers that it registers with the NIC. The usual way is the `IPC_LOCK` capability. `privileged` gives all capabilities, so `CapEff` went from `00000000a80425fb` to `000001ffffffffff`. On these nodes, CRI-O also sets an unlimited `memlock` limit for every container. So `ulimit -l` showed `unlimited` in every pod, privileged or not.
+The pod also has to lock memory, because RDMA pins the buffers that it registers with the NIC. The usual way is the `IPC_LOCK` capability. `privileged` gives all capabilities, so `CapEff` went from `00000000a80425fb` to `000001ffffffffff`. On these nodes, a CRI-O drop-in also sets an unlimited `memlock` limit for every container. Stock CRI-O does not do that. So `ulimit -l` showed `unlimited` in every pod, privileged or not.
 
 A device plugin can give a pod the RDMA devices without `privileged`. The next part uses one. The fix section below shows another way, with CRI-O.
 
