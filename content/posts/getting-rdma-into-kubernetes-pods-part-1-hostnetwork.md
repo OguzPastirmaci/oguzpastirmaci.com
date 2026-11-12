@@ -284,7 +284,7 @@ NCCL INFO NET/IB : Made virtual device [16] name=mlx5_5+mlx5_6 speed=200000 ndev
 NCCL INFO Channel 00/0 : 9[1] -> 0[0] [receive] via NET/IB/16/GDRDMA/flush=Always
 ```
 
-The image also has an NCCL net plugin called SPCX. It is the [Spectrum-X NCCL plugin](https://networking-docs.nvidia.com/hpcxum/2.51/spectrum-x-nccl-plugin), and Oracle Cloud shapes on the multiplanar network use it. Here, it printed one `NET/MLX5` warning for each rail and then failed to initialize. NCCL then used its built-in IB transport:
+The image also has an NCCL net plugin called SPCX. It is the [Spectrum-X NCCL plugin](https://networking-docs.nvidia.com/hpcxum/2.51/spectrum-x-nccl-plugin), and Oracle Cloud shapes on the multiplanar network use it. Here, it printed one `NET/MLX5` warning for each rail and then failed to initialize. The warnings are harmless. NCCL then used its built-in IB transport:
 
 ```
 NCCL WARN NET/MLX5: Call to mlx5dv_devx_general_cmd failed with error Remote I/O error
