@@ -1569,7 +1569,7 @@ On nodes with a lower limit, the pod needs a higher `memlock` limit or `IPC_LOCK
 
 ## The exclusive mode with the RDMA CNI
 
-Everything above ran in the shared RDMA namespace mode, with no RDMA CNI in the network. I also tested the other setup. It is the exclusive mode, with the RDMA CNI in the chain. I tested it with 1 VF per PF.
+Everything above ran in the shared RDMA namespace mode. The RDMA CNI was installed on the nodes, but the network did not call it. I also tested the other setup. It is the exclusive mode, with the RDMA CNI in the chain. I tested it with 1 VF per PF.
 
 The mode is the `netns_mode` parameter of `ib_core`. On these nodes, `/etc/modprobe.d/ib_core.conf` sets it, and the initramfs has a copy of that file. So I changed the file, ran `update-initramfs` and rebooted the node:
 
