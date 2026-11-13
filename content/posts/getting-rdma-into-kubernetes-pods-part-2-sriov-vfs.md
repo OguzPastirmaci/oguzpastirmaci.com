@@ -1549,7 +1549,7 @@ Going from 1 to 2 VFs per PF drained each node for about 2 minutes. Creating VFs
 
 ### More moving parts
 
-Per-rail resources need 16 policies and 16 networks, and every pod lists 16 resources. Many parts have to work for a pod to get its rails. They are the SR-IOV Network Operator, its config daemon, the device plugin, Multus, the CNI plugins and NVIDIA IPAM. On the 3 nodes without GPUs, Multus restarted 2 to 4 times right after it started. The last restart on each of them was `OOMKilled`. Its memory limit is 50Mi.
+Per-rail resources need 16 policies and 16 networks, and every pod lists 16 resources. Many parts have to work for a pod to get its rails. They are the SR-IOV Network Operator, its config daemon, the device plugin, Multus, the CNI plugins and NVIDIA IPAM. On the 3 nodes without GPUs, Multus restarted 2 to 4 times right after it started. The last restart on each of them was `OOMKilled`. Its default memory limit is 50Mi.
 
 ### IP addresses
 
