@@ -13,7 +13,7 @@ With SR-IOV, each port of a NIC is a physical function (PF) that can create virt
 
 The costs are in how pods share the rails. With 1 VF per PF, a pod that takes all 16 rails takes them for the whole node. Two jobs that split the rails got 17.95 and 8.99 GB/s. With 2 VFs per PF and one resource for each rail, every pod got a VF on every rail. Two jobs with 4 GPUs per node then got 96.28 and 96.35 GB/s at the same time. In part 1, a job with 4 GPUs per node got 96.64 GB/s.
 
-I also tested the exclusive RDMA namespace mode with the RDMA CNI. There, the VFs sent their traffic with the wrong traffic class, and `ib_write_bw` got about half.
+I also tested the exclusive RDMA namespace mode with the RDMA CNI. By default, the RDMA CNI forced traffic class 0 on each VF, and `ib_write_bw` got about half. With `rdmaQoS` in the network, it got the full bandwidth.
 
 Every manifest and script in this post ran on the test cluster. Long files are collapsed, so click a file name to open it.
 
@@ -1678,30 +1678,83 @@ $ cat /sys/class/infiniband/mlx5_18/tc/1/traffic_class
 Global tclass=0
 ```
 
-The file was empty for all 16 new VFs. It read `Global tclass=0` for all 16 after the RDMA CNI moved them into a pod. It stayed that way on the node after I deleted the pod. In the shared mode, the file stayed empty in the pod and after it.
-
-I could not fix this from the node. Creating the VFs again did not help, because the next pod set the value again. The file was read-only in the network namespace of the pod. I did not test a move of the device by hand, without the RDMA CNI.
+The file was empty for all 16 new VFs. It read `Global tclass=0` for all 16 after the RDMA CNI moved them into a pod. It stayed that way on the node after I deleted the pod. In the shared mode, the file stayed empty on the node, and the pod had no such file.
 
 More queue pairs hid the loss. With 4 queue pairs (`-q 4`), the same rail reached 97.97 Gb/s.
 
+The RDMA CNI writes this file itself. The RDMA CNI in Network Operator 26.7.1 has an optional `rdmaQoS` setting. Before it moves the device into the pod, it writes the `tc` value of that setting to the file. The network above has no `rdmaQoS`, so the RDMA CNI wrote 0. When the pod goes away, it writes back the value that it read first. It reads the empty file as 0, so 0 stays on the node.
+
+So I added `rdmaQoS` with traffic class 41 to the RDMA CNI in the network:
+
+{{< code language="yaml" title="sriov-network-exclusive-qos.yaml" open="false" >}}
+# Exclusive RDMA mode: the RDMA CNI moves the VF RDMA device into the pod.
+# rdmaQoS sets the traffic class that the RDMA CNI writes for the device.
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetwork
+metadata:
+  name: rdma-vf
+  namespace: nvidia-network-operator
+spec:
+  resourceName: rdma-vf
+  networkNamespace: default
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "sriov-pool"
+    }
+  metaPlugins: |
+    {
+      "type": "tuning",
+      "sysctl": {
+        "net.ipv4.conf.all.rp_filter": "0",
+        "net.ipv4.conf.IFNAME.arp_announce": "2",
+        "net.ipv4.conf.IFNAME.arp_filter": "1",
+        "net.ipv4.conf.IFNAME.arp_ignore": "1",
+        "net.ipv4.conf.IFNAME.rp_filter": "0",
+        "net.ipv4.conf.IFNAME.accept_local": "1"
+      }
+    },
+    {
+      "type": "rdma",
+      "rdmaQoS": {
+        "tc": 41
+      }
+    },
+    {
+      "type": "sbr",
+      "addSourceHints": true
+    }
+{{< /code >}}
+
+I ran this on the nodes of part 1, with the same Network Operator. Both modes ran on the same day. Without `rdmaQoS`, the rails gave 50.60 to 59.02 Gb/s in two runs. With it, every VF in the pods read `Global tclass=41`. Every rail gave 96.78 to 96.88 Gb/s. In the shared mode, the rails gave 96.85 to 96.88 Gb/s. These are the counters of one rail in the exclusive mode, as above:
+
+| Sender | Traffic class file | Packets on priority 0 | Packets on priority 1 | Result |
+|---|---|---|---|---|
+| VF, no `rdmaQoS` | `Global tclass=0` | 0 | 29,678,580 | 54.40 Gb/s |
+| VF, `rdmaQoS` with `tc` 41 | `Global tclass=41` | 29,562,736 | 0 | 96.86 Gb/s |
+| PF, `hostNetwork` pod | Empty | 29,563,121 | 22 | 96.87 Gb/s |
+
+The README of the RDMA CNI shows `rdmaQoS` under `args.cni`. I tried that too, and the pods still got `Global tclass=0`. The code reads `rdmaQoS` only at the top level of the plugin, as in the file above.
+
 ### NCCL in both modes
 
-The NCCL job sets 4 queue pairs for each connection, so it lost much less. These are the results at 8 GiB, out of place and in place:
+The NCCL job sets 4 queue pairs for each connection. These are the results at 8 GiB, out of place and in place, from the same day on the nodes of part 1:
 
-| Setup | `busbw` at 8 GiB |
-|---|---|
-| Shared mode, no RDMA CNI | 181.83 / 181.07 GB/s |
-| Exclusive mode, RDMA CNI, first run | 171.66 / 180.30 GB/s |
-| Exclusive mode, RDMA CNI, second run | 181.66 / 157.77 GB/s |
+| Setup | `busbw` at 8 GiB | Priority of the packets |
+|---|---|---|
+| Shared mode, no RDMA CNI | 188.87 / 190.02 GB/s | 0 |
+| Exclusive mode, RDMA CNI without `rdmaQoS` | 190.77 / 190.71 GB/s | 1 |
+| Exclusive mode, RDMA CNI with `rdmaQoS`, first run | 190.68 / 190.62 GB/s | 0 |
+| Exclusive mode, RDMA CNI with `rdmaQoS`, second run | 189.86 / 190.55 GB/s | 0 |
 
-During the second run, the NCCL traffic also left on priority 1, even with `NCCL_IB_TC=41`. All three numbers are below the 190.55 GB/s at the start of this post. On the day of this test, the network gave less at full load, in `hostNetwork` pods too. So the two modes compare only with each other here. The exclusive mode was less steady. One half of each run was about 9 and 24 GB/s lower than the other.
+I counted the packets on the 16 rails of one node. In each run, at most 83 packets went to the other priority. With 4 queue pairs, NCCL got the full bandwidth even on priority 1.
 
-On these nodes, I stay with the shared mode and no RDMA CNI. It kept the traffic class that the job asked for.
+So the exclusive mode needs `rdmaQoS` with the traffic class of the jobs. Then both modes gave the full bandwidth.
 
 ## When VFs fit
 
 1 VF per PF worked well for one job per node that uses all 16 rails. It got the full bandwidth of `hostNetwork` without `privileged`. The GID index of each VF stayed at 3.
 
-All of this is for the shared RDMA mode without the RDMA CNI. In the exclusive mode with the RDMA CNI, the pods saw fewer devices. But the VFs lost the traffic class of the job.
+All of this is for the shared RDMA mode without the RDMA CNI. In the exclusive mode with the RDMA CNI, the pods saw fewer devices. The network then needs `rdmaQoS`, or the RDMA CNI forces traffic class 0 on each VF.
 
 For two jobs per node, 2 VFs per PF with one resource for each rail worked. Each job got every rail and used the NICs next to its GPUs, at the full bandwidth. The costs are 16 policies and networks, drains when the VF count changes, and ports that two pods share.
