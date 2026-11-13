@@ -143,7 +143,7 @@ The device cgroup of the container blocks it. A container can only open the devi
 
 The pod also has to lock memory, because RDMA pins the buffers that it registers with the NIC. The usual way is the `IPC_LOCK` capability. `privileged` gives all capabilities, so `CapEff` went from `00000000a80425fb` to `000001ffffffffff`. On these nodes, a CRI-O drop-in also sets an unlimited `memlock` limit for every container. Stock CRI-O does not do that. So `ulimit -l` showed `unlimited` in every pod, privileged or not.
 
-A device plugin can give a pod the RDMA devices without `privileged`. The next part uses one. The fix section below shows another way, with CRI-O.
+A device plugin can give a pod the RDMA devices without `privileged`. [The next part](/posts/getting-rdma-into-kubernetes-pods-part-2-sriov-vfs/) uses one. The fix section below shows another way, with CRI-O.
 
 ### Host name and DNS
 
@@ -656,4 +656,4 @@ The pod uses the rails and their sysctls as the node configured them. The ARP po
 
 It fits less well when jobs share nodes, or when the cluster has more than one tenant. Then you have to manage ports by hand. You also need the fix above, or something like it, to keep jobs off each other's GPUs. And the namespace has to use the Privileged level of Pod Security.
 
-The next part runs the same tests with SR-IOV VFs, on the other pair of nodes. Each pod gets its own VF on each rail, through a device plugin and without `privileged`.
+[The next part](/posts/getting-rdma-into-kubernetes-pods-part-2-sriov-vfs/) runs the same tests with SR-IOV VFs, on the other pair of nodes. Each pod gets its own VF on each rail, through a device plugin and without `privileged`.
