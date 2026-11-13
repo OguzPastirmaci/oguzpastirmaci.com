@@ -122,7 +122,7 @@ spec:
   gateway: 192.168.0.1
 {{< /code >}}
 
-The operator drains one node at a time:
+By default, the operator drains one node at a time. This file sets the same limit, as an example:
 
 {{< code language="yaml" title="sriov-network-pool-config.yaml" open="false" >}}
 apiVersion: sriovnetwork.openshift.io/v1
