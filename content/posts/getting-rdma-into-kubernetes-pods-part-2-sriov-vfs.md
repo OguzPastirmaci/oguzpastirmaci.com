@@ -1734,7 +1734,7 @@ I ran this on the nodes of part 1, with the same Network Operator. Both modes ra
 | VF, `rdmaQoS` with `tc` 41 | `Global tclass=41` | 29,562,736 | 0 | 96.86 Gb/s |
 | PF, `hostNetwork` pod | Empty | 29,563,121 | 22 | 96.87 Gb/s |
 
-The README of the RDMA CNI shows `rdmaQoS` under `args.cni`. I tried that too, and the pods still got `Global tclass=0`. The code reads `rdmaQoS` only at the top level of the plugin, as in the file above.
+The README of the RDMA CNI shows `rdmaQoS` under `args.cni`. I tried that too, and the pods still got `Global tclass=0`. The code reads `rdmaQoS` only at the top level of the plugin, as in the file above. I reported the default of 0 and the README example in [Network Operator issue #3710](https://github.com/Mellanox/network-operator/issues/3710).
 
 ### NCCL in both modes
 
