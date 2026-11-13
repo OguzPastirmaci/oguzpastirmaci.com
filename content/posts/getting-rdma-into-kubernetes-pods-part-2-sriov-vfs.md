@@ -398,8 +398,6 @@ done
 
 Every rail gave 96.86 to 96.88 Gb/s. In part 1, `hostNetwork` gave 96.86 to 96.88 Gb/s.
 
-I also ran `ib_write_bw` on all 16 VF pairs at the same time, with 4 queue pairs on each rail. Each pair gave 49.88 to 56.55 Gb/s, and the total was 849.54 Gb/s. The same test between two `hostNetwork` pods on these nodes gave 713.08 and 805.66 Gb/s in two runs. So the VFs are not the limit of that test.
-
 In the NCCL job, each rank sets `NCCL_IB_HCA` to the RDMA devices of the VFs in its own pod. The worker runs sshd on port 22, which is the default:
 
 {{< code language="yaml" title="nccl-test.yaml" open="false" >}}
@@ -509,19 +507,9 @@ The port problem of part 1 is gone, and a pod that asked for GPUs got only its o
 
 ## What 1 VF per PF costs
 
-### One pod per node gets all the rails
-
-A pod with `nvidia.com/rdma-vf: 16` takes every VF of its node. I started two jobs with 4 GPUs per node, and each asked for 16 VFs. Each job got one worker on a different node. The other worker of each job stayed Pending:
-
-```
-0/5 nodes are available: 2 Insufficient nvidia.com/rdma-vf, 3 node(s) didn't match Pod's node affinity/selector.
-```
-
-So neither job could run. A gang scheduler places all workers of a job or none of them. Then one job would run and the other would wait. The [gang scheduling post](/posts/gang-scheduling-and-topology-aware-scheduling-in-upstream-kubernetes/) covers this.
-
 ### Splitting the rails
 
-Next, each of the two jobs asked for 8 VFs. Both jobs started. Each pod got 8 VF interfaces, on the rails of its VFs. These are the pods on one node:
+With 1 VF per PF, a node has 16 VFs, so only one pod per node can get every rail. For two jobs per node, each job asked for 8 VFs. Both jobs started. Each pod got 8 VF interfaces, on the rails of its VFs. These are the pods on one node:
 
 | Job | GPUs | PFs of its VFs |
 |---|---|---|
