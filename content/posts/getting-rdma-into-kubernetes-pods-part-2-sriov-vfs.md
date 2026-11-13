@@ -11,7 +11,7 @@ This series tests four ways to give a Kubernetes pod RDMA for GPU training, on t
 
 With SR-IOV, each port of a NIC is a physical function (PF) that can create virtual functions (VFs). A VF has its own network interface, MAC address and RDMA device. Each pod gets one VF on each rail, and it stays on the pod network. The pod is not privileged. With 1 VF per PF, it got the same bandwidth as `hostNetwork`. NCCL reached 190.55 GB/s.
 
-The costs are in how pods share the rails. With 1 VF per PF, a pod that takes all 16 rails takes them for the whole node. Two jobs that split the rails got 17.95 and 8.99 GB/s. With 2 VFs per PF and one resource for each rail, every pod got a VF on every rail. Two jobs with 4 GPUs per node then got 96.28 and 96.35 GB/s at the same time. In part 1, a job with 4 GPUs per node got 96.64 GB/s.
+The hard part is sharing the rails between pods. With 1 VF per PF, a pod that takes all 16 rails takes them for the whole node. Two jobs that split the rails got 17.95 and 8.99 GB/s. With 2 VFs per PF and one resource for each rail, every pod got a VF on every rail. Two jobs with 4 GPUs per node then got 96.28 and 96.35 GB/s at the same time. In part 1, a job with 4 GPUs per node got 96.64 GB/s.
 
 I also tested the exclusive RDMA namespace mode with the RDMA CNI. By default, the RDMA CNI forced traffic class 0 on each VF, and `ib_write_bw` got about half. With `rdmaQoS` in the network, it got the full bandwidth.
 
@@ -1757,4 +1757,4 @@ So the exclusive mode needs `rdmaQoS` with the traffic class of the jobs. Then b
 
 All of this is for the shared RDMA mode without the RDMA CNI. In the exclusive mode with the RDMA CNI, the pods saw fewer devices. The network then needs `rdmaQoS`, or the RDMA CNI forces traffic class 0 on each VF.
 
-For two jobs per node, 2 VFs per PF with one resource for each rail worked. Each job got every rail and used the NICs next to its GPUs, at the full bandwidth. The costs are 16 policies and networks, drains when the VF count changes, and ports that two pods share.
+For two jobs per node, 2 VFs per PF with one resource for each rail worked. Each job got every rail and used the NICs next to its GPUs, at the full bandwidth. In return, it needs 16 policies and networks, and drains when the VF count changes. Two pods also share each port.

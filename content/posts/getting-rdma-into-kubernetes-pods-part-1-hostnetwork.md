@@ -16,7 +16,7 @@ There are four common ways to give a Kubernetes pod RDMA for GPU training:
 
 This series tests all four on A100 nodes with the same setup, so the results can be compared. This part ran on a second pair of nodes in a new cluster.
 
-This first part covers `hostNetwork`. It is the simplest way, and it gets the full bandwidth of the nodes. NCCL `all_reduce` reached 190 GB/s bus bandwidth at 8 GiB on 16 GPUs. But `hostNetwork: true` alone does not give a pod RDMA. The settings that make it work have costs, and one of them is easy to miss. A privileged pod can use every GPU on the node, not only the GPUs it asked for. This post also shows a fix that works without `privileged`.
+This first part covers `hostNetwork`. It is the simplest way, and it gets the full bandwidth of the nodes. NCCL `all_reduce` reached 190 GB/s bus bandwidth at 8 GiB on 16 GPUs. But `hostNetwork: true` alone does not give a pod RDMA. The settings that make it work have side effects, and one of them is easy to miss. A privileged pod can use every GPU on the node, not only the GPUs it asked for. This post also shows a fix that works without `privileged`.
 
 Earlier posts cover some parts of this topic, so this post links to them:
 
