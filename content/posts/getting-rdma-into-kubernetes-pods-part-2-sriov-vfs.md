@@ -73,7 +73,9 @@ operator:
       memory: 512Mi
 {{< /code >}}
 
-`values.yaml` turns off the NFD of the chart, because the cluster already runs NFD. It also turns off the `mellanox` plugin of the SR-IOV Network Operator. That plugin changes NIC firmware settings. The firmware here already allows 127 VFs on each PF. With the plugin on, the operator would change that number to match the policy, then drain and reboot each node. Turning the plugin off avoids these reboots. Oracle Cloud supports at most 2 VFs per PF, so I tested 1 and 2.
+`values.yaml` turns off the NFD of the chart, because the cluster already runs NFD. It also turns off the `mellanox` plugin of the SR-IOV Network Operator. That plugin changes NIC firmware settings. The firmware here already allows 127 VFs on each PF. With the plugin on, the operator would change that number to match the policy, then drain and reboot each node. Turning the plugin off avoids these reboots.
+
+Oracle Cloud supports at most 2 VFs on each RDMA PF, so I tested 1 VF per PF first, and then 2.
 
 The operator configuration then had the `daemon` mode, drains turned on, and the `mellanox` plugin off:
 
