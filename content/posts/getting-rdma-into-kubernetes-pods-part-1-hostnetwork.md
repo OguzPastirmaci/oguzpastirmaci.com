@@ -14,7 +14,7 @@ There are four common ways to give a Kubernetes pod RDMA for GPU training:
 3. The pod gets the RDMA devices of the rails and an IPvlan interface on each rail.
 4. A DRA driver gives the pod its own interface on each rail.
 
-This series tests all four on the same two A100 nodes, so the results can be compared.
+This series tests all four on A100 nodes with the same setup, so the results can be compared. This part ran on a second pair of nodes in a new cluster.
 
 This first part covers `hostNetwork`. It is the simplest way, and it gets the full bandwidth of the nodes. NCCL `all_reduce` reached 190 GB/s bus bandwidth at 8 GiB on 16 GPUs. But `hostNetwork: true` alone does not give a pod RDMA. The settings that make it work have costs, and one of them is easy to miss. A privileged pod can use every GPU on the node, not only the GPUs it asked for. This post also shows a fix that works without `privileged`.
 
@@ -28,7 +28,7 @@ Every manifest and script in this post ran on the test cluster. Long files are c
 
 ## The test setup
 
-- 2 x BM.GPU.B4.8 on OKE v1.36.4, with CRI-O 1.36.3
+- 4 x BM.GPU.B4.8 on OKE v1.36.4, with CRI-O 1.36.3. The tests used 2 of them, and the other 2 were cordoned.
 - Each node has 8 A100-SXM4-40GB GPUs and 16 RoCE rails at 100 Gb/s, `rdma0` to `rdma15`. The rails are the two ports of 8 ConnectX-5 Ex NICs, all in one IPv4 subnet.
 - Ubuntu 24.04 with kernel 6.17, DOCA-OFED 3.5.0 and NVIDIA driver 595.112.07, with `nvidia_peermem` loaded
 - The NVIDIA GPU Operator 26.3.3, which gives GPUs to pods through CDI, and the MPI Operator 0.8.2
@@ -54,7 +54,7 @@ metadata:
 spec:
   hostNetwork: true
   nodeSelector:
-    kubernetes.io/hostname: "10.140.66.66"
+    kubernetes.io/hostname: "10.140.86.84"
   tolerations:
     - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
   containers:
@@ -77,7 +77,7 @@ metadata:
 spec:
   hostNetwork: true
   nodeSelector:
-    kubernetes.io/hostname: "10.140.82.106"
+    kubernetes.io/hostname: "10.140.89.190"
   tolerations:
     - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
   containers:
@@ -128,7 +128,7 @@ Both nodes gave the same results:
 The `hostPath` mount adds the files, but the pod still cannot open them. The file permissions allow it:
 
 ```
-crw-rw-rw- 1 root root 231, 192 Nov  8 15:27 /dev/infiniband/uverbs0
+crw-rw-rw- 1 root root 231, 192 Nov 13 09:44 /dev/infiniband/uverbs0
 ```
 
 But `open()` fails:
@@ -150,15 +150,15 @@ A device plugin can give a pod the RDMA devices without `privileged`. The next p
 A `hostNetwork` pod also gets the host name and the DNS settings of the node:
 
 ```
-hostname: oke-cbuyudv52dq-n6z2qyqtd3q-slvnzsli2gq-1
-resolv.conf: search vsqvvr.oraclevcn.com nameserver 169.254.169.254
+hostname: oke-cdhzek5e6za-niqfkyrmiba-s3zwzog2wia-0
+resolv.conf: search njagol.oraclevcn.com nameserver 169.254.169.254
 ```
 
 The pod on the pod network had its own name and the cluster DNS:
 
 ```
 hostname: rdma-probe-pod-network-n1
-resolv.conf: search rdma-hostnet.svc.cluster.local svc.cluster.local cluster.local vsqvvr.oraclevcn.com nameserver 10.96.5.5
+resolv.conf: search rdma-hostnet.svc.cluster.local svc.cluster.local cluster.local njagol.oraclevcn.com nameserver 10.96.5.5
 ```
 
 With the DNS settings of the node, the pod cannot resolve cluster names. In a `hostNetwork` pod, `getent hosts kubernetes.default.svc.cluster.local` got no answer. With `dnsPolicy: ClusterFirstWithHostNet`, it returned `10.96.0.1`. The host name stays the name of the node, and the torchrun post shows how that breaks PyTorch.
@@ -188,7 +188,7 @@ for i in $(seq 0 15); do
 done
 {{< /code >}}
 
-My first run did not have `--tclass=41`, and it was uneven. The 16 rails gave 47.04 to 59.05 Gb/s. Other options without `--tclass` gave 55.18 to 97.94 Gb/s on `rdma0`. The NCCL jobs below set `NCCL_IB_TC=41`, and `ib_write_bw` uses traffic class 0 unless you pass `--tclass`. With `--tclass=41`, every rail gave 96.87 or 96.88 Gb/s.
+My first run did not have `--tclass=41`, and it was uneven. The 16 rails gave 49.44 to 60.08 Gb/s. Other options without `--tclass` gave 55.75 to 97.95 Gb/s on `rdma0`. The NCCL jobs below set `NCCL_IB_TC=41`, and `ib_write_bw` uses traffic class 0 unless you pass `--tclass`. With `--tclass=41`, every rail gave 96.86 to 96.88 Gb/s.
 
 ## The NCCL baseline
 
@@ -220,13 +220,21 @@ spec:
               command: ["bash", "-c"]
               args:
                 - |
-                  mpirun --allow-run-as-root --hostfile /etc/mpi/hostfile \
-                    -np 16 --map-by ppr:8:node --bind-to none \
+                  mpirun --allow-run-as-root \
+                    -mca coll ^hcoll -mca plm_rsh_args "-p 2222" --hostfile /etc/mpi/hostfile \
+                    -mca coll_hcoll_enable 0 \
+                    -np 16 -npernode 8 --bind-to numa \
                     -x NCCL_DEBUG=INFO -x NCCL_DEBUG_SUBSYS=INIT,NET \
-                    -x NCCL_SOCKET_IFNAME=eth0 \
-                    -x NCCL_IB_HCA==mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7,mlx5_8,mlx5_9,mlx5_10,mlx5_11,mlx5_12,mlx5_14,mlx5_15,mlx5_16,mlx5_17 \
-                    -x NCCL_IB_GID_INDEX=3 -x NCCL_IB_TC=41 -x NCCL_IB_SL=0 -x NCCL_IB_TIMEOUT=22 \
-                    -x NCCL_IB_QPS_PER_CONNECTION=4 -x NCCL_IB_SPLIT_DATA_ON_QPS=0 \
+                    -x NCCL_IB_SPLIT_DATA_ON_QPS=0 \
+                    -x NCCL_IB_QPS_PER_CONNECTION=4 \
+                    -x NCCL_IB_GID_INDEX=3 \
+                    -x NCCL_IB_HCA==mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7,mlx5_8,mlx5_14,mlx5_15,mlx5_16,mlx5_17,mlx5_9,mlx5_10,mlx5_11,mlx5_12 \
+                    -x NCCL_IB_TC=41 \
+                    -x NCCL_IB_SL=0 \
+                    -x NCCL_IB_TIMEOUT=22 \
+                    -x HCOLL_ENABLE_MCAST_ALL=0 \
+                    -x UCX_TLS=tcp \
+                    -x UCX_NET_DEVICES=eth0 \
                     /workspace/nccl-tests/build/all_reduce_perf -b 1G -e 8G -f 2 -g 1
     Worker:
       replicas: 2
@@ -270,12 +278,12 @@ This is the result, trimmed to the sizes from 2 GiB:
 
 ```
 #       size         count      type   redop    root     time   algbw   busbw  #wrong     time   algbw   busbw  #wrong
-  2147483648     536870912     float     sum      -1  21303.1  100.81  189.01       0  21339.2  100.64  188.69       0
-  4294967296    1073741824     float     sum      -1  42483.8  101.10  189.56       0  42499.1  101.06  189.49       0
-  8589934592    2147483648     float     sum      -1  84693.8  101.42  190.17       0  84781.9  101.32  189.97       0
+  2147483648     536870912     float     sum      -1  21550.8   99.65  186.84       0  21308.0  100.78  188.97       0
+  4294967296    1073741824     float     sum      -1  42386.7  101.33  189.99       0  42547.0  100.95  189.27       0
+  8589934592    2147483648     float     sum      -1  84527.4  101.62  190.54       0  84638.4  101.49  190.29       0
 ```
 
-At 8 GiB, the bus bandwidth was 190.17 GB/s.
+At 8 GiB, the bus bandwidth was 190.54 GB/s.
 
 NCCL used all 16 rails, with GPUDirect RDMA. It merged the two ports of each NIC into one virtual device of 200 Gb/s:
 
@@ -298,19 +306,13 @@ I ran the same job without the `/dev/shm` volume. The workers had the default si
 
 ```
 Filesystem      Size  Used Avail Use% Mounted on
-shm              64M   34M   31M  52% /dev/shm
+shm              64M     0   64M   0% /dev/shm
 ```
 
 The launcher failed on every attempt, and the job ended as `Failed`. NCCL could not create its shared memory segments. Each one was larger than 64 MiB by itself:
 
 ```
-NCCL WARN Error while creating shared memory segment /dev/shm/nccl-zAgsHw (size 68420264), error: No space left on device (28)
-```
-
-UCX in Open MPI failed the same way:
-
-```
-UCX  ERROR   Not enough memory to write total of 4292720 bytes. Please check that /dev/shm or the directory you specified has more available memory.
+NCCL WARN Error while creating shared memory segment /dev/shm/nccl-4ilNyk (size 68420264), error: No space left on device (28)
 ```
 
 ## What it costs
@@ -342,13 +344,21 @@ spec:
               command: ["bash", "-c"]
               args:
                 - |
-                  mpirun --allow-run-as-root --hostfile /etc/mpi/hostfile \
-                    -np 16 --map-by ppr:8:node --bind-to none \
+                  mpirun --allow-run-as-root \
+                    -mca coll ^hcoll -mca plm_rsh_args "-p 22" --hostfile /etc/mpi/hostfile \
+                    -mca coll_hcoll_enable 0 \
+                    -np 16 -npernode 8 --bind-to numa \
                     -x NCCL_DEBUG=INFO -x NCCL_DEBUG_SUBSYS=INIT,NET \
-                    -x NCCL_SOCKET_IFNAME=eth0 \
-                    -x NCCL_IB_HCA==mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7,mlx5_8,mlx5_9,mlx5_10,mlx5_11,mlx5_12,mlx5_14,mlx5_15,mlx5_16,mlx5_17 \
-                    -x NCCL_IB_GID_INDEX=3 -x NCCL_IB_TC=41 -x NCCL_IB_SL=0 -x NCCL_IB_TIMEOUT=22 \
-                    -x NCCL_IB_QPS_PER_CONNECTION=4 -x NCCL_IB_SPLIT_DATA_ON_QPS=0 \
+                    -x NCCL_IB_SPLIT_DATA_ON_QPS=0 \
+                    -x NCCL_IB_QPS_PER_CONNECTION=4 \
+                    -x NCCL_IB_GID_INDEX=3 \
+                    -x NCCL_IB_HCA==mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7,mlx5_8,mlx5_14,mlx5_15,mlx5_16,mlx5_17,mlx5_9,mlx5_10,mlx5_11,mlx5_12 \
+                    -x NCCL_IB_TC=41 \
+                    -x NCCL_IB_SL=0 \
+                    -x NCCL_IB_TIMEOUT=22 \
+                    -x HCOLL_ENABLE_MCAST_ALL=0 \
+                    -x UCX_TLS=tcp \
+                    -x UCX_NET_DEVICES=eth0 \
                     /workspace/nccl-tests/build/all_reduce_perf -b 1G -e 8G -f 2 -g 1
     Worker:
       replicas: 2
@@ -391,34 +401,34 @@ The launcher failed too. A worker that is not Ready drops out of the headless se
 ssh: Could not resolve hostname nccl-port22-worker-1.nccl-port22.rdma-hostnet.svc: Name or service not known
 ```
 
-`launcherCreationPolicy: WaitForWorkersReady` did not stop this. The events show that the workers started and the operator created the launcher in the same second. The workers have no readiness probe, so they were Ready as soon as their containers started.
+`launcherCreationPolicy: WaitForWorkersReady` did not stop this. The events show that the workers started, and the operator created the launcher one second later. The workers have no readiness probe, so they were Ready as soon as their containers started.
 
 The scheduler only knows about the ports that pods declare. It does not know about the sshd of the node, so it placed both workers. It does know about ports of other pods. I started two jobs with 4 GPUs per node, and both declared port 2222. The nodes had 4 free GPUs each, but the workers of the second job stayed Pending:
 
 ```
-0/5 nodes are available: 2 node(s) didn't have free ports for the requested pod ports, 3 Insufficient nvidia.com/gpu.
+0/7 nodes are available: 2 node(s) didn't have free ports for the requested pod ports, 2 node(s) were unschedulable, 3 Insufficient nvidia.com/gpu.
 ```
 
-The other 3 nodes have no GPUs. So two `hostNetwork` jobs can share a node only if each one uses its own ports. That includes the sshd port, and any port that your training code listens on.
+The 2 unschedulable nodes are the GPU nodes that I cordoned. The other 3 nodes have no GPUs. So two `hostNetwork` jobs can share a node only if each one uses its own ports. That includes the sshd port, and any port that your training code listens on.
 
 ### GPUs
 
 I moved the second job to port 2223, and both jobs started. Each one asked for 4 GPUs on each node. But both jobs ran on the same 4 GPUs. This is from the second job:
 
 ```
-#  Rank  0 Group  0 Pid   1412 on oke-cbuyudv52dq-n6z2qyqtd3q-slvnzsli2gq-0 device  0 [0000:0f:00] NVIDIA A100-SXM4-40GB
-#  Rank  1 Group  0 Pid   1410 on oke-cbuyudv52dq-n6z2qyqtd3q-slvnzsli2gq-0 device  1 [0000:15:00] NVIDIA A100-SXM4-40GB
-#  Rank  2 Group  0 Pid   1409 on oke-cbuyudv52dq-n6z2qyqtd3q-slvnzsli2gq-0 device  2 [0000:50:00] NVIDIA A100-SXM4-40GB
-#  Rank  3 Group  0 Pid   1411 on oke-cbuyudv52dq-n6z2qyqtd3q-slvnzsli2gq-0 device  3 [0000:53:00] NVIDIA A100-SXM4-40GB
+#  Rank  0 Group  0 Pid   3027 on oke-cdhzek5e6za-niqfkyrmiba-s3zwzog2wia-0 device  0 [0000:0f:00] NVIDIA A100-SXM4-40GB
+#  Rank  1 Group  0 Pid   3028 on oke-cdhzek5e6za-niqfkyrmiba-s3zwzog2wia-0 device  1 [0000:15:00] NVIDIA A100-SXM4-40GB
+#  Rank  2 Group  0 Pid   3029 on oke-cdhzek5e6za-niqfkyrmiba-s3zwzog2wia-0 device  2 [0000:50:00] NVIDIA A100-SXM4-40GB
+#  Rank  3 Group  0 Pid   3030 on oke-cdhzek5e6za-niqfkyrmiba-s3zwzog2wia-0 device  3 [0000:53:00] NVIDIA A100-SXM4-40GB
 ```
 
-The first job listed the same 4 PCI addresses. Both launchers failed at first. The first job's launcher kept failing while the second job ran:
+The first job listed the same 4 PCI addresses. Both launchers failed at first. The second job's launcher then kept failing while the first job ran:
 
 ```
 NCCL WARN Cuda failure 2 'out of memory'
 ```
 
-It succeeded only on the attempt that started as the second job was finishing. Kubernetes saw nothing wrong. The scheduler counted 4 + 4 GPUs on each node. The device plugin gave each pod its own 4 GPUs.
+It succeeded only on an attempt that started after the first job had finished. Kubernetes saw nothing wrong. The scheduler counted 4 + 4 GPUs on each node. The device plugin gave each pod its own 4 GPUs.
 
 The cause is the same as in the `privileged` step above. To check it, I started two pods with 4 GPUs each on one node. I ran them with `privileged`, and then without it:
 
@@ -432,7 +442,7 @@ metadata:
 spec:
   hostNetwork: true
   nodeSelector:
-    kubernetes.io/hostname: "10.140.66.66"
+    kubernetes.io/hostname: "10.140.86.84"
   tolerations:
     - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
   containers:
@@ -453,7 +463,7 @@ metadata:
 spec:
   hostNetwork: true
   nodeSelector:
-    kubernetes.io/hostname: "10.140.66.66"
+    kubernetes.io/hostname: "10.140.86.84"
   tolerations:
     - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
   containers:
@@ -556,13 +566,21 @@ spec:
               command: ["bash", "-c"]
               args:
                 - |
-                  mpirun --allow-run-as-root --hostfile /etc/mpi/hostfile \
-                    -np 16 --map-by ppr:8:node --bind-to none \
+                  mpirun --allow-run-as-root \
+                    -mca coll ^hcoll -mca plm_rsh_args "-p 2222" --hostfile /etc/mpi/hostfile \
+                    -mca coll_hcoll_enable 0 \
+                    -np 16 -npernode 8 --bind-to numa \
                     -x NCCL_DEBUG=INFO -x NCCL_DEBUG_SUBSYS=INIT,NET \
-                    -x NCCL_SOCKET_IFNAME=eth0 \
-                    -x NCCL_IB_HCA==mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7,mlx5_8,mlx5_9,mlx5_10,mlx5_11,mlx5_12,mlx5_14,mlx5_15,mlx5_16,mlx5_17 \
-                    -x NCCL_IB_GID_INDEX=3 -x NCCL_IB_TC=41 -x NCCL_IB_SL=0 -x NCCL_IB_TIMEOUT=22 \
-                    -x NCCL_IB_QPS_PER_CONNECTION=4 -x NCCL_IB_SPLIT_DATA_ON_QPS=0 \
+                    -x NCCL_IB_SPLIT_DATA_ON_QPS=0 \
+                    -x NCCL_IB_QPS_PER_CONNECTION=4 \
+                    -x NCCL_IB_GID_INDEX=3 \
+                    -x NCCL_IB_HCA==mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7,mlx5_8,mlx5_14,mlx5_15,mlx5_16,mlx5_17,mlx5_9,mlx5_10,mlx5_11,mlx5_12 \
+                    -x NCCL_IB_TC=41 \
+                    -x NCCL_IB_SL=0 \
+                    -x NCCL_IB_TIMEOUT=22 \
+                    -x HCOLL_ENABLE_MCAST_ALL=0 \
+                    -x UCX_TLS=tcp \
+                    -x UCX_NET_DEVICES=eth0 \
                     /workspace/nccl-tests/build/all_reduce_perf -b 1G -e 8G -f 2 -g 1
     Worker:
       replicas: 2
@@ -598,15 +616,15 @@ spec:
 
 Then I ran the two jobs with 4 GPUs per node again. They had the same changes and ports 2222 and 2223. This time they ran at the same time, and both NCCL runs completed:
 
-| Job | GPUs on each node | NICs that NCCL used | `busbw` at 8 GiB |
+| Job | GPUs and NICs on node 1 | GPUs and NICs on node 2 | `busbw` at 8 GiB |
 |---|---|---|---|
-| 8 GPUs, `privileged` | All 8 | All 16 rails | 190.17 GB/s |
-| 8 GPUs, fix | All 8 | All 16 rails | 190.24 GB/s |
-| 4 GPUs alone, `privileged` | `0F`, `15`, `50`, `53` | `rdma0` to `rdma7` | 96.62 GB/s |
-| 4 GPUs, fix, first job | `50`, `53`, `8C`, `91` | `rdma4` to `rdma11` | 96.37 GB/s |
-| 4 GPUs, fix, second job | `0F`, `15`, `D6`, `DA` | `rdma0` to `rdma3`, `rdma12` to `rdma15` | 96.29 GB/s |
+| 8 GPUs, `privileged` | All 8 GPUs, all 16 rails | All 8 GPUs, all 16 rails | 190.54 GB/s |
+| 8 GPUs, fix | All 8 GPUs, all 16 rails | All 8 GPUs, all 16 rails | 190.36 GB/s |
+| 4 GPUs alone, `privileged` | `0F`, `15`, `50`, `53` on `rdma0` to `rdma7` | `0F`, `15`, `50`, `53` on `rdma0` to `rdma7` | 96.64 GB/s |
+| 4 GPUs, fix, first job | `0F`, `15`, `D6`, `DA` on `rdma0` to `rdma3` and `rdma12` to `rdma15` | `0F`, `15`, `50`, `53` on `rdma0` to `rdma7` | 96.40 GB/s |
+| 4 GPUs, fix, second job | `50`, `53`, `8C`, `91` on `rdma4` to `rdma11` | `8C`, `91`, `D6`, `DA` on `rdma8` to `rdma15` | 96.36 GB/s |
 
-Each job got its own 4 GPUs, and NCCL picked the NICs closest to them. So the two jobs also used different NICs. The fix did not cost bandwidth.
+Each job got its own 4 GPUs, and NCCL picked the NICs closest to them. So the two jobs also used different NICs. The device plugin picked a different set of GPUs for a job on each node. The fix did not cost bandwidth.
 
 The handler also has `privileged_without_host_devices = true`. So CRI-O does not add the devices of the node to a privileged pod on it. I tested that setting first, without the annotation. A privileged pod with the `hostPath` mount got only its own 4 GPUs. But RDMA failed again with `Failed to open device`. CRI-O did not lift the device cgroup limit for it. With the annotation, a privileged pod on this handler also worked.
 
@@ -638,4 +656,4 @@ The pod uses the rails and their sysctls as the node configured them. The ARP po
 
 It fits less well when jobs share nodes, or when the cluster has more than one tenant. Then you have to manage ports by hand. You also need the fix above, or something like it, to keep jobs off each other's GPUs. And the namespace has to use the Privileged level of Pod Security.
 
-The next part runs the same tests with SR-IOV VFs on the same two nodes. Each pod gets its own VF on each rail, through a device plugin and without `privileged`.
+The next part runs the same tests with SR-IOV VFs, on the other pair of nodes. Each pod gets its own VF on each rail, through a device plugin and without `privileged`.
