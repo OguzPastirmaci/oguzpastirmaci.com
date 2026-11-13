@@ -28,7 +28,7 @@ Every manifest and script in this post ran on the test cluster. Long files are c
 
 ## The test setup
 
-- 4 x BM.GPU.B4.8 on OKE v1.36.4, with CRI-O 1.36.3. The tests used 2 of them, and the other 2 were cordoned.
+- 4 x BM.GPU.B4.8 on OKE v1.36.4, with CRI-O 1.36.3.
 - Each node has 8 A100-SXM4-40GB GPUs and 16 RoCE rails at 100 Gb/s, `rdma0` to `rdma15`. The rails are the two ports of 8 ConnectX-5 Ex NICs, all in one IPv4 subnet.
 - Ubuntu 24.04 with kernel 6.17, DOCA-OFED 3.5.0 and NVIDIA driver 595.112.07, with `nvidia_peermem` loaded
 - The NVIDIA GPU Operator 26.3.3, which gives GPUs to pods through CDI, and the MPI Operator 0.8.2
