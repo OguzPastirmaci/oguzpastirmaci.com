@@ -1810,7 +1810,7 @@ So the exclusive mode needs `rdmaQoS` with the traffic class of the jobs. Then b
 
 ## When VFs fit
 
-1 VF per PF worked well for one job per node that uses all 16 rails. It got the full bandwidth of `hostNetwork` without `privileged`. The GID index of each VF stayed at 3.
+1 VF per PF worked well for one job per node that uses all 16 rails. It got the full bandwidth of `hostNetwork` without `privileged`. The GID index of each VF stayed at 3. With the `restricted` Topology Manager policy, two jobs per node also got the full bandwidth.
 
 All of this is for the shared RDMA mode without the RDMA CNI. In the exclusive mode with the RDMA CNI, the pods saw fewer devices. The network then needs `rdmaQoS`, or the RDMA CNI forces traffic class 0 on each VF.
 
