@@ -11,7 +11,7 @@ This series tests four ways to give a Kubernetes pod RDMA for GPU training, on t
 
 With SR-IOV, each port of a NIC is a physical function (PF) that can create virtual functions (VFs). A VF has its own network interface, MAC address and RDMA device. Each pod gets one VF on each rail, and it stays on the pod network. The pod is not privileged. With 1 VF per PF, it got the same bandwidth as `hostNetwork`. NCCL reached 190.55 GB/s.
 
-The hard part is sharing the rails between pods. With 1 VF per PF, a pod that takes all 16 rails takes them for the whole node. Two jobs can split the rails, with 4 GPUs and 8 VFs each per node. Each PCIe root of these nodes has 2 GPUs and 2 NICs. NCCL uses GPUDirect RDMA only when the NIC is close enough to the GPU. But the kubelet got the GPUs and the VFs from two device plugins, and did not match them. So many NCCL channels used a NIC on another root, and their data went through CPU memory. The two jobs got 17.95 and 8.99 GB/s. With 2 VFs per PF and one resource for each rail, every pod got a VF on every rail. Two jobs with 4 GPUs per node then got 96.28 and 96.35 GB/s at the same time. In part 1, a job with 4 GPUs per node got 96.64 GB/s.
+The hard part is sharing the rails between pods. With 1 VF per PF, a pod that takes all 16 rails takes them for the whole node. Two jobs can split the rails, with 4 GPUs and 8 VFs each per node. Each PCIe root of these nodes has 2 GPUs and 2 NICs. NCCL uses GPUDirect RDMA only when the NIC is close enough to the GPU. But the kubelet got the GPUs and the VFs from two device plugins, and did not match them. So many NCCL channels used a NIC on another root, and their data went through CPU memory. The two jobs got 17.95 and 8.99 GB/s. With 2 VFs per PF and one resource for each rail, every pod got a VF on every rail. Two jobs with 4 GPUs per node then got 96.28 and 96.35 GB/s at the same time. In [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/), a job with 4 GPUs per node got 96.64 GB/s.
 
 I also tested the exclusive RDMA namespace mode with the RDMA CNI. By default, the RDMA CNI forced traffic class 0 on each VF, and `ib_write_bw` got about half. With `rdmaQoS` in the network, it got the full bandwidth.
 
@@ -27,13 +27,13 @@ These nodes run in the shared RDMA namespace mode of `ib_core`. The current node
 
 ## The setup
 
-The setup and the image are the same as in part 1, on a different pair of nodes:
+The setup and the image are the same as in [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/), on a different pair of nodes:
 
 - 2 x BM.GPU.B4.8 on OKE v1.36.4, with CRI-O 1.36.3
 - Each node has 8 A100 GPUs and 16 RoCE rails at 100 Gb/s, all in the IPv4 subnet `10.224.0.0/12`
 - DOCA-OFED 3.5.0 in the shared RDMA namespace mode
 - The NVIDIA GPU Operator 26.3.3
-- The image with NCCL 2.32.3 and perftest 6.28 from part 1
+- The image with NCCL 2.32.3 and perftest 6.28 from [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/)
 
 These results are for a single plane network with IPv4 rails, like the one these nodes use. The same logic applies to Oracle Cloud shapes on the multiplanar network, but their configuration is different.
 
@@ -356,7 +356,7 @@ The VF has a RoCE v2 GID for its address at index 3. In shared mode, the pod see
 
 ## The results with 1 VF per PF
 
-I tested each rail with `ib_write_bw`, one rail at a time, as in part 1. `vf-map.sh` prints the PF, the address and the RDMA device of each VF in a pod. `rails-vf.sh` pairs the VFs of the two pods by their PF:
+I tested each rail with `ib_write_bw`, one rail at a time, as in [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/). `vf-map.sh` prints the PF, the address and the RDMA device of each VF in a pod. `rails-vf.sh` pairs the VFs of the two pods by their PF:
 
 {{< code language="bash" title="vf-map.sh" open="false" >}}
 #!/bin/bash
@@ -396,7 +396,7 @@ for pf in $pfs; do
 done
 {{< /code >}}
 
-Every rail gave 96.86 to 96.88 Gb/s. In part 1, `hostNetwork` gave 96.86 to 96.88 Gb/s.
+Every rail gave 96.86 to 96.88 Gb/s. In [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/), `hostNetwork` gave 96.86 to 96.88 Gb/s.
 
 In the NCCL job, each rank sets `NCCL_IB_HCA` to the RDMA devices of the VFs in its own pod. The worker runs sshd on port 22, which is the default:
 
@@ -494,7 +494,7 @@ This is the result:
 | `hostNetwork`, CRI-O fix (part 1) | 190.36 GB/s |
 | 1 VF per PF | 190.55 GB/s |
 
-A second run with `NCCL_DEBUG=INFO` gave 190.78 GB/s. NCCL merged the two VFs of each NIC into one virtual device. It did the same with the PFs in part 1. All 16 channels used GPUDirect RDMA:
+A second run with `NCCL_DEBUG=INFO` gave 190.78 GB/s. NCCL merged the two VFs of each NIC into one virtual device. It did the same with the PFs in [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/). All 16 channels used GPUDirect RDMA:
 
 ```
 NCCL INFO NET/IB : Made virtual device [16] name=mlx5_18+mlx5_19 speed=200000 ndevs=2 rail=-1 plane=16385
@@ -503,24 +503,24 @@ NCCL INFO Channel 00/0 : 1[1] -> 8[0] [receive] via NET/IB/16/GDRDMA/flush=Alway
 
 Each VF is its own RDMA device, so its GID index does not depend on other pods. Every VF in these tests had its GID at index 3.
 
-The port problem of part 1 is gone, and a pod that asked for GPUs got only its own GPUs. The sshd of each worker used port 22. Each worker in the two-job runs below saw only its own 4 GPUs.
+The port problem of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/) is gone, and a pod that asked for GPUs got only its own GPUs. The sshd of each worker used port 22. Each worker in the two-job runs below saw only its own 4 GPUs.
 
-## What 1 VF per PF costs
+## Trade-offs of 1 VF per PF
 
 ### Splitting the rails
 
 With 1 VF per PF, a node has 16 VFs, so only one pod per node can get every rail. For two jobs per node, each job asked for 8 VFs. Both jobs started. Each pod got 8 VF interfaces, on the rails of its VFs. These are the pods on one node:
 
-| Job | GPUs | PFs of its VFs |
+| Job | GPUs | Rails of its VFs |
 |---|---|---|
-| First | `50`, `53`, `8C`, `91` | `0c.1`, `16.0`, `16.1`, `47.1`, `4b.0`, `89.0`, `c3.0`, `d1.0` |
-| Second | `0F`, `15`, `D6`, `DA` | `0c.0`, `47.0`, `4b.1`, `89.1`, `93.0`, `93.1`, `c3.1`, `d1.1` |
+| First | 2, 3, 4, 5 | `rdma1`, `rdma2`, `rdma3`, `rdma5`, `rdma6`, `rdma8`, `rdma12`, `rdma14` |
+| Second | 0, 1, 6, 7 | `rdma0`, `rdma4`, `rdma7`, `rdma9`, `rdma10`, `rdma11`, `rdma13`, `rdma15` |
 
 By PCIe root, the two jobs got these devices:
 
 [![Which GPUs and VFs the two jobs got on one node, by PCIe root](/images/vf-split-rails.png)](/images/vf-split-rails.png)
 
-The VFs did not follow the GPUs. In part 1, NCCL put GPUs `0F`, `15`, `D6` and `DA` on the NICs at `0c`, `16`, `c3` and `d1`. These NICs hold the rails `rdma0` to `rdma3` and `rdma12` to `rdma15`. The other 4 GPUs used `47`, `4b`, `89` and `93`. Here, each job got VFs on NICs on both sides. The two ports of one NIC sometimes went to different jobs. In each job, 4 of the 6 channels had a network connection without GPUDirect RDMA, all on the other node. NCCL uses GPUDirect RDMA only up to a set distance between the NIC and the GPU. `NCCL_NET_GDR_LEVEL` sets that distance, and by default NCCL picks it from the topology. Without GPUDirect RDMA, the data goes through CPU memory.
+The VFs did not follow the GPUs. In [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/), NCCL put GPUs 0, 1, 6 and 7 on `rdma0` to `rdma3` and `rdma12` to `rdma15`. The other 4 GPUs used `rdma4` to `rdma11`. Here, each job got VFs on NICs on both sides. The two ports of one NIC sometimes went to different jobs. In each job, 4 of the 6 channels had a network connection without GPUDirect RDMA, all on the other node. NCCL uses GPUDirect RDMA only up to a set distance between the NIC and the GPU. `NCCL_NET_GDR_LEVEL` sets that distance, and by default NCCL picks it from the topology. Without GPUDirect RDMA, the data goes through CPU memory.
 
 [![The 4 PCIe roots of one BM.GPU.B4.8 node, each with 2 GPUs and 2 NICs, and the two data paths between a GPU and a NIC](/images/gpu-nic-topology.png)](/images/gpu-nic-topology.png)
 
@@ -531,7 +531,7 @@ The bandwidth dropped:
 | First | 17.95 GB/s | 17.93 GB/s |
 | Second | 8.99 GB/s | 25.63 GB/s |
 
-The second job ran longer, and its in-place half ran after the first job had finished. With the CRI-O fix of part 1, two jobs like these got 96.40 and 96.36 GB/s at the same time.
+The second job ran longer, and its in-place half ran after the first job had finished. With the CRI-O fix of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/), two jobs like these got 96.40 and 96.36 GB/s at the same time.
 
 ## Two VFs per PF
 
@@ -584,10 +584,10 @@ I started two pods per node with 16 VFs each. The kubelet does not know which ra
 
 | Pod | Rails with 2 VFs | Rails with no VF |
 |---|---|---|
-| 1 | 4 | `0c.0`, `16.0`, `16.1`, `4b.0` |
-| 2 | 4 | `47.1`, `93.0`, `93.1`, `c3.0` |
-| 3 | 5 | `16.1`, `47.1`, `4b.1`, `89.1`, `c3.0` |
-| 4 | 5 | `0c.1`, `47.0`, `4b.0`, `93.0`, `93.1` |
+| 1 | 4 | `rdma0`, `rdma2`, `rdma3`, `rdma6` |
+| 2 | 4 | `rdma5`, `rdma10`, `rdma11`, `rdma12` |
+| 3 | 5 | `rdma3`, `rdma5`, `rdma7`, `rdma9`, `rdma12` |
+| 4 | 5 | `rdma1`, `rdma4`, `rdma6`, `rdma10`, `rdma11` |
 
 ### One resource for each rail
 
@@ -1510,11 +1510,11 @@ Then I ran the two jobs with 4 GPUs per node at the same time:
 | First | 96.28 GB/s | 96.32 GB/s |
 | Second | 96.35 GB/s | 96.37 GB/s |
 
-Each worker used the 4 NICs next to its GPUs. The worker with GPUs `8C`, `91`, `D6` and `DA` used the NICs at `89`, `93`, `c3` and `d1`. The worker with `0F`, `15`, `50` and `53` used `0c`, `16`, `47` and `4b`. All 8 channels of each job used GPUDirect RDMA. The results match the CRI-O fix of part 1. The Topology Manager of the kubelet stayed at its default policy, `none`.
+Each worker used the 4 NICs next to its GPUs. The worker with GPUs 4 to 7 used the NICs of `rdma8` to `rdma15`. The worker with GPUs 0 to 3 used `rdma0` to `rdma7`. All 8 channels of each job used GPUDirect RDMA. The results match the CRI-O fix of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/). The Topology Manager of the kubelet stayed at its default policy, `none`.
 
 A job with 8 GPUs per node on the same setup got 190.04 GB/s.
 
-## What 2 VFs per PF cost
+## Trade-offs of 2 VFs per PF
 
 ### Two pods share each port
 
@@ -1542,10 +1542,10 @@ echo "pair b: $(awk '/^ 65536/ {print $4" Gb/s"}' /tmp/share-b.log)"
 cat /tmp/share-a.log /tmp/share-b.log >&2
 {{< /code >}}
 
-| PF | One pair alone | Two pairs at the same time |
+| Rail | One pair alone | Two pairs at the same time |
 |---|---|---|
-| `0c.0` (`rdma0`) | 96.88 Gb/s | 48.96 and 49.00 Gb/s |
-| `89.0` (`rdma8`) | 96.87 Gb/s | 49.02 and 48.99 Gb/s |
+| `rdma0` | 96.88 Gb/s | 48.96 and 49.00 Gb/s |
+| `rdma8` | 96.87 Gb/s | 49.02 and 48.99 Gb/s |
 
 In the NCCL test, the two jobs used different NICs on each node, so they did not share a port. Two jobs that use the same NICs split the bandwidth of each port.
 
@@ -1657,7 +1657,7 @@ I ran both setups on the same day, with one pod of 16 VFs on each node:
 | A network with the RDMA CNI | The pod stays in `ContainerCreating` | Works |
 | `ib_write_bw` on each rail | 96.87 to 96.88 Gb/s | 43.20 to 59.45 Gb/s |
 
-So the exclusive mode isolates better. A pod sees no RDMA device of the node or of another pod. In the shared mode, the pod sees them all in sysfs. It has device files only for its own VFs. The `privileged` `hostNetwork` pod of part 1 is different. It has every device file, so it could open the VF of another pod.
+So the exclusive mode isolates better. A pod sees no RDMA device of the node or of another pod. In the shared mode, the pod sees them all in sysfs. It has device files only for its own VFs. The `privileged` `hostNetwork` pod of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/) is different. It has every device file, so it could open the VF of another pod.
 
 ### The traffic class in the exclusive mode
 
@@ -1732,7 +1732,7 @@ spec:
     }
 {{< /code >}}
 
-I ran this on the nodes of part 1, with the same Network Operator. Both modes ran on the same day. Without `rdmaQoS`, the rails gave 50.60 to 59.02 Gb/s in two runs. With it, every VF in the pods read `Global tclass=41`. Every rail gave 96.78 to 96.88 Gb/s. In the shared mode, the rails gave 96.85 to 96.88 Gb/s. These are the counters of one rail in the exclusive mode, as above:
+I ran this on the nodes of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/), with the same Network Operator. Both modes ran on the same day. Without `rdmaQoS`, the rails gave 50.60 to 59.02 Gb/s in two runs. With it, every VF in the pods read `Global tclass=41`. Every rail gave 96.78 to 96.88 Gb/s. In the shared mode, the rails gave 96.85 to 96.88 Gb/s. These are the counters of one rail in the exclusive mode, as above:
 
 | Sender | Traffic class file | Packets on priority 0 | Packets on priority 1 | Result |
 |---|---|---|---|---|
@@ -1744,7 +1744,7 @@ The README of the RDMA CNI shows `rdmaQoS` under `args.cni`. I tried that too, a
 
 ### NCCL in both modes
 
-The NCCL job sets 4 queue pairs for each connection. These are the results at 8 GiB, out of place and in place, from the same day on the nodes of part 1:
+The NCCL job sets 4 queue pairs for each connection. These are the results at 8 GiB, out of place and in place. All of them ran on one day, on the nodes of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/):
 
 | Setup | `busbw` at 8 GiB | Priority of the packets |
 |---|---|---|

@@ -315,7 +315,7 @@ The launcher failed on every attempt, and the job ended as `Failed`. NCCL could 
 NCCL WARN Error while creating shared memory segment /dev/shm/nccl-4ilNyk (size 68420264), error: No space left on device (28)
 ```
 
-## What it costs
+## The trade-offs
 
 ### Ports
 
@@ -483,8 +483,8 @@ The plain pods are the same, without `privileged`.
 |---|---|---|
 | `gpu4-privileged-1` | 8 | All 8 |
 | `gpu4-privileged-2` | 8 | All 8 |
-| `gpu4-plain-1` | 4 | `0F`, `15`, `D6`, `DA` |
-| `gpu4-plain-2` | 4 | `50`, `53`, `8C`, `91` |
+| `gpu4-plain-1` | 4 | 0, 1, 6, 7 |
+| `gpu4-plain-2` | 4 | 2, 3, 4, 5 |
 
 The GPU Operator gives a pod its GPUs through CDI. It adds only the device files of those GPUs to the container. `privileged` adds every device of the node on top of that, and CUDA uses every GPU it can open. So CUDA device 0 in a privileged pod is the first GPU of the node. It does not matter which GPUs the device plugin gave the pod.
 
@@ -616,13 +616,13 @@ spec:
 
 Then I ran the two jobs with 4 GPUs per node again. They had the same changes and ports 2222 and 2223. This time they ran at the same time, and both NCCL runs completed:
 
-| Job | GPUs and NICs on node 1 | GPUs and NICs on node 2 | `busbw` at 8 GiB |
+| Job | GPUs and rails on node 1 | GPUs and rails on node 2 | `busbw` at 8 GiB |
 |---|---|---|---|
 | 8 GPUs, `privileged` | All 8 GPUs, all 16 rails | All 8 GPUs, all 16 rails | 190.54 GB/s |
 | 8 GPUs, fix | All 8 GPUs, all 16 rails | All 8 GPUs, all 16 rails | 190.36 GB/s |
-| 4 GPUs alone, `privileged` | `0F`, `15`, `50`, `53` on `rdma0` to `rdma7` | `0F`, `15`, `50`, `53` on `rdma0` to `rdma7` | 96.64 GB/s |
-| 4 GPUs, fix, first job | `0F`, `15`, `D6`, `DA` on `rdma0` to `rdma3` and `rdma12` to `rdma15` | `0F`, `15`, `50`, `53` on `rdma0` to `rdma7` | 96.40 GB/s |
-| 4 GPUs, fix, second job | `50`, `53`, `8C`, `91` on `rdma4` to `rdma11` | `8C`, `91`, `D6`, `DA` on `rdma8` to `rdma15` | 96.36 GB/s |
+| 4 GPUs alone, `privileged` | 0, 1, 2, 3 on `rdma0` to `rdma7` | 0, 1, 2, 3 on `rdma0` to `rdma7` | 96.64 GB/s |
+| 4 GPUs, fix, first job | 0, 1, 6, 7 on `rdma0` to `rdma3` and `rdma12` to `rdma15` | 0, 1, 2, 3 on `rdma0` to `rdma7` | 96.40 GB/s |
+| 4 GPUs, fix, second job | 2, 3, 4, 5 on `rdma4` to `rdma11` | 4, 5, 6, 7 on `rdma8` to `rdma15` | 96.36 GB/s |
 
 Each job got its own 4 GPUs, and NCCL picked the NICs closest to them. So the two jobs also used different NICs. The device plugin picked a different set of GPUs for a job on each node. The fix did not cost bandwidth.
 
