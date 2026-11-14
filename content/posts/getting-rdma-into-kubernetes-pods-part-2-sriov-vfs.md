@@ -578,6 +578,8 @@ Warning   TopologyAffinityError   Resources cannot be allocated with Topology lo
 
 The scheduler does not know about NUMA nodes, so it cannot avoid this. The job with 8 GPUs and 16 VFs still ran, at 189.06 GB/s.
 
+The policy `best-effort` does not reject pods. It looks for the same alignment, but the kubelet admits the pod even when it cannot align it. The pod then gets some devices from other NUMA nodes, with no error. Such a job can run as slowly as with `none`. I did not test `best-effort`, but the [Topology Manager documentation](https://kubernetes.io/docs/tasks/administer-cluster/topology-manager/) describes it.
+
 I changed the kubelet configuration by hand on the two nodes, and I put it back after the tests. For real use, the change belongs in the node setup.
 
 ## Two VFs per PF
