@@ -11,7 +11,7 @@ This series tests four ways to give a Kubernetes pod RDMA for GPU training, on t
 
 With SR-IOV, each port of a NIC is a physical function (PF) that can create virtual functions (VFs). A VF has its own network interface, MAC address and RDMA device. Each pod gets one VF on each rail, and it stays on the pod network. The pod is not privileged. With 1 VF per PF, it got the same bandwidth as `hostNetwork`. NCCL reached 190.55 GB/s.
 
-The hard part is sharing the rails between pods. With 1 VF per PF, a pod that takes all 16 rails takes them for the whole node. Two jobs that split the rails got 17.95 and 8.99 GB/s. With 2 VFs per PF and one resource for each rail, every pod got a VF on every rail. Two jobs with 4 GPUs per node then got 96.28 and 96.35 GB/s at the same time. In part 1, a job with 4 GPUs per node got 96.64 GB/s.
+The hard part is sharing the rails between pods. With 1 VF per PF, a pod that takes all 16 rails takes them for the whole node. Two jobs can split the rails, with 4 GPUs and 8 VFs each per node. Each PCIe root of these nodes has 2 GPUs and 2 NICs. NCCL uses GPUDirect RDMA only when the NIC is close enough to the GPU. But the kubelet got the GPUs and the VFs from two device plugins, and did not match them. So many NCCL channels used a NIC on another root, and their data went through CPU memory. The two jobs got 17.95 and 8.99 GB/s. With 2 VFs per PF and one resource for each rail, every pod got a VF on every rail. Two jobs with 4 GPUs per node then got 96.28 and 96.35 GB/s at the same time. In part 1, a job with 4 GPUs per node got 96.64 GB/s.
 
 I also tested the exclusive RDMA namespace mode with the RDMA CNI. By default, the RDMA CNI forced traffic class 0 on each VF, and `ib_write_bw` got about half. With `rdmaQoS` in the network, it got the full bandwidth.
 
@@ -516,7 +516,13 @@ With 1 VF per PF, a node has 16 VFs, so only one pod per node can get every rail
 | First | `50`, `53`, `8C`, `91` | `0c.1`, `16.0`, `16.1`, `47.1`, `4b.0`, `89.0`, `c3.0`, `d1.0` |
 | Second | `0F`, `15`, `D6`, `DA` | `0c.0`, `47.0`, `4b.1`, `89.1`, `93.0`, `93.1`, `c3.1`, `d1.1` |
 
-The VFs did not follow the GPUs. In part 1, NCCL put GPUs `0F`, `15`, `D6` and `DA` on the NICs at `0c`, `16`, `c3` and `d1`. These NICs hold the rails `rdma0` to `rdma3` and `rdma12` to `rdma15`. The other 4 GPUs used `47`, `4b`, `89` and `93`. Here, each job got VFs on NICs on both sides. The two ports of one NIC sometimes went to different jobs. In each job, 4 of the 6 channels had a network connection without GPUDirect RDMA, all on the other node.
+By PCIe root, the two jobs got these devices:
+
+[![Which GPUs and VFs the two jobs got on one node, by PCIe root](/images/vf-split-rails.png)](/images/vf-split-rails.png)
+
+The VFs did not follow the GPUs. In part 1, NCCL put GPUs `0F`, `15`, `D6` and `DA` on the NICs at `0c`, `16`, `c3` and `d1`. These NICs hold the rails `rdma0` to `rdma3` and `rdma12` to `rdma15`. The other 4 GPUs used `47`, `4b`, `89` and `93`. Here, each job got VFs on NICs on both sides. The two ports of one NIC sometimes went to different jobs. In each job, 4 of the 6 channels had a network connection without GPUDirect RDMA, all on the other node. NCCL uses GPUDirect RDMA only up to a set distance between the NIC and the GPU. `NCCL_NET_GDR_LEVEL` sets that distance, and by default NCCL picks it from the topology. Without GPUDirect RDMA, the data goes through CPU memory.
+
+[![The 4 PCIe roots of one BM.GPU.B4.8 node, each with 2 GPUs and 2 NICs, and the two data paths between a GPU and a NIC](/images/gpu-nic-topology.png)](/images/gpu-nic-topology.png)
 
 The bandwidth dropped:
 
