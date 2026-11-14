@@ -7,7 +7,7 @@ tags = ["rdma", "kubernetes", "nccl", "sr-iov", "oke"]
 description = "Part 2 of a series on RDMA in Kubernetes pods for GPU training. Each pod gets its own SR-IOV virtual function on each rail, with 1 or 2 VFs per physical function."
 +++
 
-This series tests four ways to give a Kubernetes pod RDMA for GPU training, on two pairs of A100 nodes. [Part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/) used `hostNetwork` and set the baseline, on the second pair with the same setup. NCCL `all_reduce` reached 190.54 GB/s bus bandwidth at 8 GiB on 16 GPUs. This part covers SR-IOV VFs, [part 3](/posts/getting-rdma-into-kubernetes-pods-part-3-ipvlan/) covers IPvlan, and part 4 covers DRA.
+This series tests four ways to give a Kubernetes pod RDMA for GPU training, on two pairs of A100 nodes. [Part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/) used `hostNetwork` and set the baseline, on the second pair with the same setup. NCCL `all_reduce` reached 190.54 GB/s bus bandwidth at 8 GiB on 16 GPUs. This part covers SR-IOV VFs, [part 3](/posts/getting-rdma-into-kubernetes-pods-part-3-ipvlan/) covers IPvlan, and [part 4](/posts/getting-rdma-into-kubernetes-pods-part-4-dranet/) covers DRA.
 
 With SR-IOV, each port of a NIC is a physical function (PF) that can create virtual functions (VFs). A VF has its own network interface, MAC address and RDMA device. Each pod gets one VF on each rail, and it stays on the pod network. The pod is not privileged. With 1 VF per PF, it got the same bandwidth as `hostNetwork`. NCCL reached 190.55 GB/s.
 
@@ -535,7 +535,7 @@ The bandwidth dropped:
 
 With the CRI-O fix of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/), two jobs like these got 96.40 and 96.36 GB/s at the same time.
 
-One job alone, with the same request, got 96.22 GB/s. The kubelet gave it GPUs 0 to 3, and 5 or 6 of its 8 VFs on their PCIe roots. Every NCCL channel used GPUDirect RDMA. So without the Topology Manager, the result depends on which VFs the pod gets.
+One job alone, with the same request, got 96.22 GB/s. The kubelet gave it GPUs 0 to 3, and 5 or 6 of its 8 VFs on their PCIe roots. Every NCCL channel used GPUDirect RDMA. So without the Topology Manager, the result depends on which VFs the pod gets. In the worst case, no GPU of a job shares a root with its VFs. [Part 4](/posts/getting-rdma-into-kubernetes-pods-part-4-dranet/#gpus-from-the-device-plugin) measured that case on one node, at 4.27 and 5.77 GB/s.
 
 ### Aligning the VFs with the Topology Manager
 

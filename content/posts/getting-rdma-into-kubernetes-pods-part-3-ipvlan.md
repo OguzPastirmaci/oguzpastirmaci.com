@@ -7,7 +7,7 @@ tags = ["rdma", "kubernetes", "nccl", "ipvlan", "oke"]
 description = "Part 3 of a series on RDMA in Kubernetes pods for GPU training. The pod stays on the pod network and gets the RDMA devices of the rails. It also gets an IPvlan interface on each rail."
 +++
 
-This series tests four ways to give a Kubernetes pod RDMA for GPU training, on two pairs of A100 nodes. [Part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/) used `hostNetwork` and set the baseline, on the second pair with the same setup. NCCL `all_reduce` reached 190.54 GB/s bus bandwidth at 8 GiB on 16 GPUs. [Part 2](/posts/getting-rdma-into-kubernetes-pods-part-2-sriov-vfs/) covers SR-IOV VFs, this part covers IPvlan, and part 4 covers DRA.
+This series tests four ways to give a Kubernetes pod RDMA for GPU training, on two pairs of A100 nodes. [Part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/) used `hostNetwork` and set the baseline, on the second pair with the same setup. NCCL `all_reduce` reached 190.54 GB/s bus bandwidth at 8 GiB on 16 GPUs. [Part 2](/posts/getting-rdma-into-kubernetes-pods-part-2-sriov-vfs/) covers SR-IOV VFs, this part covers IPvlan, and [part 4](/posts/getting-rdma-into-kubernetes-pods-part-4-dranet/) covers DRA.
 
 With IPvlan, the pod stays on the pod network. A device plugin gives it the RDMA devices of the rails. Multus calls the IPvlan CNI plugin for each rail, and that plugin adds an IPvlan interface to the pod. NVIDIA IPAM gives each interface its own IP address. The pod is not privileged, and it got the same bandwidth as `hostNetwork`. NCCL reached 189.15 GB/s, and 190.75 GB/s in a second run.
 
@@ -1040,6 +1040,8 @@ I also ran the first job alone. It got 26.95 GB/s, so sharing the node was not t
 ```
 NCCL INFO Channel 01/0 : 5[1] -> 0[0] [send] via NET/IB/9
 ```
+
+In the worst case, no GPU of a job shares a root with its PFs. [Part 4](/posts/getting-rdma-into-kubernetes-pods-part-4-dranet/#gpus-from-the-device-plugin) measured that case on one node, at 4.27 and 5.77 GB/s.
 
 With the CRI-O fix of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/), two jobs like these got 96.40 and 96.36 GB/s at the same time.
 
