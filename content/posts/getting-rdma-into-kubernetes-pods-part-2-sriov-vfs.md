@@ -7,7 +7,7 @@ tags = ["rdma", "kubernetes", "nccl", "sr-iov", "oke"]
 description = "Part 2 of a series on RDMA in Kubernetes pods for GPU training. Each pod gets its own SR-IOV virtual function on each rail, with 1 or 2 VFs per physical function."
 +++
 
-This series tests four ways to give a Kubernetes pod RDMA for GPU training, on two A100 nodes. [Part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/) used `hostNetwork` and set the baseline, on a second pair of nodes with the same setup. NCCL `all_reduce` reached 190.54 GB/s bus bandwidth at 8 GiB on 16 GPUs. This part covers SR-IOV VFs, part 3 covers IPvlan, and part 4 covers DRA.
+This series tests four ways to give a Kubernetes pod RDMA for GPU training, on two pairs of A100 nodes. [Part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/) used `hostNetwork` and set the baseline, on the second pair with the same setup. NCCL `all_reduce` reached 190.54 GB/s bus bandwidth at 8 GiB on 16 GPUs. This part covers SR-IOV VFs, part 3 covers IPvlan, and part 4 covers DRA.
 
 With SR-IOV, each port of a NIC is a physical function (PF) that can create virtual functions (VFs). A VF has its own network interface, MAC address and RDMA device. Each pod gets one VF on each rail, and it stays on the pod network. The pod is not privileged. With 1 VF per PF, it got the same bandwidth as `hostNetwork`. NCCL reached 190.55 GB/s.
 
@@ -27,7 +27,7 @@ These nodes run in the shared RDMA namespace mode of `ib_core`. Their `/etc/modp
 
 ## The setup
 
-The setup and the image are the same as in [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/), on a different pair of nodes:
+Most tests ran on the first pair of nodes. The sections that ran on the nodes of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/) say so. The setup and the image are the same as in part 1:
 
 - 2 x BM.GPU.B4.8 on OKE v1.36.4, with CRI-O 1.36.3
 - Each node has 8 A100 GPUs and 16 RoCE rails at 100 Gb/s, all in the IPv4 subnet `10.224.0.0/12`
@@ -75,7 +75,7 @@ operator:
 
 `values.yaml` turns off the NFD of the chart, because the cluster already runs NFD. It also turns off the `mellanox` plugin of the SR-IOV Network Operator. That plugin changes NIC firmware settings. The firmware here already allows 127 VFs on each PF. With the plugin on, the operator would change that number to match the policy, then drain and reboot each node. Turning the plugin off avoids these reboots.
 
-Oracle Cloud supports at most 2 VFs on each RDMA PF, so I tested 1 VF per PF first, and then 2.
+Oracle Cloud supports at most 2 VFs on each RDMA PF. I tested 1 VF per PF first, and then 2.
 
 The operator configuration then had the `daemon` mode, drains turned on, and the `mellanox` plugin off:
 
@@ -216,7 +216,7 @@ spec:
   externallyManaged: false
 {{< /code >}}
 
-The operator created the VFs on both nodes in under a minute, without a drain or a reboot. Each node then offered 16 `nvidia.com/rdma-vf`.
+The operator created the VFs on both nodes in about a minute, without a drain or a reboot. Each node then offered 16 `nvidia.com/rdma-vf`.
 
 ## What the pod needs
 
@@ -535,7 +535,7 @@ The bandwidth dropped:
 
 With the CRI-O fix of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/), two jobs like these got 96.40 and 96.36 GB/s at the same time.
 
-One job alone, with the same request, got 96.22 GB/s. The kubelet gave it GPUs 0 to 3, and 5 or 6 of its 8 VFs on their PCIe roots. Every NCCL channel used GPUDirect RDMA. So with the policy `none`, the result depends on which VFs the pod gets.
+One job alone, with the same request, got 96.22 GB/s. The kubelet gave it GPUs 0 to 3, and 5 or 6 of its 8 VFs on their PCIe roots. Every NCCL channel used GPUDirect RDMA. So without the Topology Manager, the result depends on which VFs the pod gets.
 
 ### Aligning the VFs with the Topology Manager
 
@@ -1600,9 +1600,9 @@ In the NCCL test, the two jobs used different NICs on each node, so they did not
 
 Going from 1 to 2 VFs per PF drained each node for about 2 minutes. Creating VFs on PFs that had none did not drain them. A cluster that runs jobs has to plan for these drains.
 
-### Deleting the node policy resets the MTU
+### Deleting the node policy can reset the MTU
 
-I deleted the node policy after the last tests, on the nodes of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/). About two minutes later, the VFs were gone. All 16 rails also had MTU 1500 instead of 4220. The `ResetSriovDevice` function of the config daemon sets the MTU of the PF and removes its VFs. It uses 1500 when it has no saved MTU for the PF. The RoCE MTU of the rails dropped from 4096 to 1024 bytes. One flow on a rail then gave 88.58 Gb/s instead of 96.87 Gb/s. NCCL `all_reduce` on 16 GPUs dropped from about 190 to 168 GB/s. After a reboot, the rails had MTU 4220 again.
+I deleted the node policy after the `rdmaQoS` tests, on the nodes of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/). About two minutes later, the VFs were gone. All 16 rails also had MTU 1500 instead of 4220. The `ResetSriovDevice` function of the config daemon sets the MTU of the PF and removes its VFs. It uses 1500 when it has no saved MTU for the PF. The RoCE MTU of the rails dropped from 4096 to 1024 bytes. One flow on a rail then gave 88.58 Gb/s instead of 96.87 Gb/s. NCCL `all_reduce` on 16 GPUs dropped from about 190 to 168 GB/s. After a reboot, the rails had MTU 4220 again.
 
 ### More moving parts
 
@@ -1616,7 +1616,7 @@ The Baseline Pod Security Standard rejects the pod only for `IPC_LOCK`:
 Error from server (Forbidden): error when creating "psa-vf-pod.yaml": pods "vf-n1" is forbidden: violates PodSecurity "baseline:latest": non-default capabilities (container "rdma" must not include "IPC_LOCK" in securityContext.capabilities.add)
 ```
 
-These nodes do not need `IPC_LOCK`, because CRI-O sets an unlimited `memlock` limit for every container. Part 3 tests this with RDMA traffic. Baseline admitted the pod without it:
+These nodes do not need `IPC_LOCK`. A CRI-O drop-in on them sets an unlimited `memlock` limit for every container. Baseline admitted the pod without it:
 
 ```
 pod/vf-n1 created (server dry run)
@@ -1694,7 +1694,7 @@ The pod now sees only its own VF. The GID is the same as in the shared mode.
 
 ### The differences
 
-I ran both setups on the same day, with one pod of 16 VFs on each node:
+I ran both setups on the same day, with one pod of 16 VFs on each node. Only the shared-mode result with the RDMA CNI comes from an earlier test:
 
 | | Shared mode, no RDMA CNI | Exclusive mode, RDMA CNI |
 |---|---|---|
@@ -1724,15 +1724,11 @@ The VF traffic left the node with the wrong traffic class. The tests ask for tra
 
 So the VF sent its packets with DSCP 0 in the exclusive mode. The network between the nodes dropped part of them. In one run, the sender sent 29,684,122 packets and the receiver got 29,566,844. Neither NIC counted a discard. The receiver counted 11,649 out-of-sequence packets in another run of 10 seconds.
 
-DOCA-OFED has a sysfs file that forces one traffic class for an RDMA device. It showed the change:
+DOCA-OFED has a sysfs file that forces one traffic class for an RDMA device, `/sys/class/infiniband/<device>/tc/1/traffic_class`. It showed the change. My script printed the file of the 16 VFs in brackets, with the count of each value:
 
 ```
-# A new VF on the node, before any pod used it
-$ cat /sys/class/infiniband/mlx5_18/tc/1/traffic_class
-
-# The same VF in the pod, after the RDMA CNI moved it
-$ cat /sys/class/infiniband/mlx5_18/tc/1/traffic_class
-Global tclass=0
+02:30:43 VF devices:      16 [] 
+### in pod vf-n1:      16 [Global tclass=0] 
 ```
 
 The file was empty for all 16 new VFs. It read `Global tclass=0` for all 16 after the RDMA CNI moved them into a pod. It stayed that way on the node after I deleted the pod. In the shared mode, the file stayed empty on the node, and the pod had no such file.
@@ -1806,7 +1802,7 @@ The NCCL job sets 4 queue pairs for each connection. These are the results at 8 
 
 I counted the packets on the 16 rails of one node. In each run, at most 83 packets went to the other priority. With 4 queue pairs, NCCL got the full bandwidth even on priority 1.
 
-So the exclusive mode needs `rdmaQoS` with the traffic class of the jobs. Then both modes gave the full bandwidth.
+So the exclusive mode needs `rdmaQoS` with the traffic class of the jobs. With it, `ib_write_bw` got the full bandwidth in both modes, like NCCL.
 
 ## When VFs fit
 

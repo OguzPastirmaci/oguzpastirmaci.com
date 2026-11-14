@@ -14,9 +14,9 @@ There are four common ways to give a Kubernetes pod RDMA for GPU training:
 3. The pod gets the RDMA devices of the rails and an IPvlan interface on each rail.
 4. A DRA driver gives the pod its own interface on each rail.
 
-This series tests all four on A100 nodes with the same setup, so the results can be compared. This part ran on a second pair of nodes in a new cluster.
+This series tests all four on A100 nodes with the same setup, so the results can be compared. The series uses two pairs of nodes. This part ran on the second pair, in a new cluster.
 
-This first part covers `hostNetwork`. It is the simplest way, and it gets the full bandwidth of the nodes. NCCL `all_reduce` reached 190 GB/s bus bandwidth at 8 GiB on 16 GPUs. But `hostNetwork: true` alone does not give a pod RDMA. The settings that make it work have side effects, and one of them is easy to miss. A privileged pod can use every GPU on the node, not only the GPUs it asked for. This post also shows a fix that works without `privileged`.
+This first part covers `hostNetwork`. It is the simplest way, and it gets the full bandwidth of the nodes. NCCL `all_reduce` reached 190.54 GB/s bus bandwidth at 8 GiB on 16 GPUs. But `hostNetwork: true` alone does not give a pod RDMA. The settings that make it work have side effects, and one of them is easy to miss. A privileged pod can use every GPU on the node, not only the GPUs it asked for. This post also shows a fix that works without `privileged`.
 
 Earlier posts cover some parts of this topic, so this post links to them:
 
@@ -30,9 +30,9 @@ Every manifest and script in this post ran on the test cluster. Long files are c
 
 - 4 x BM.GPU.B4.8 on OKE v1.36.4, with CRI-O 1.36.3.
 - Each node has 8 A100-SXM4-40GB GPUs and 16 RoCE rails at 100 Gb/s, `rdma0` to `rdma15`. The rails are the two ports of 8 ConnectX-5 Ex NICs, all in one IPv4 subnet.
-- Ubuntu 24.04 with kernel 6.17, DOCA-OFED 3.5.0 and NVIDIA driver 595.112.07, with `nvidia_peermem` loaded
-- The NVIDIA GPU Operator 26.3.3, which gives GPUs to pods through CDI, and the MPI Operator 0.8.2
-- The public image `iad.ocir.io/idxzjcdglx2s/nccl-tests:cuda-13.4.1-ubuntu-24.04-nccl-2.32.3-100526.0`, with NCCL 2.32.3, nccl-tests 2.21.1, perftest 6.28 and Open MPI 5.0.10rc2
+- Ubuntu 24.04 with kernel 6.17, DOCA-OFED 3.5.0 and NVIDIA driver 595.112.07, with `nvidia_peermem` loaded.
+- The NVIDIA GPU Operator 26.3.3, which gives GPUs to pods through CDI, and the MPI Operator 0.8.2.
+- The public image `iad.ocir.io/idxzjcdglx2s/nccl-tests:cuda-13.4.1-ubuntu-24.04-nccl-2.32.3-100526.0`, with NCCL 2.32.3, nccl-tests 2.21.1, perftest 6.28 and Open MPI 5.0.10rc2.
 
 These results are for a single plane network with IPv4 rails, like the one these nodes use. The same logic applies to Oracle Cloud shapes on the multiplanar network, but their configuration is different.
 
@@ -479,7 +479,7 @@ spec:
 
 The plain pods are the same, without `privileged`.
 
-| Pods | `/dev/nvidiaN` files | GPUs in `nvidia-smi` |
+| Pods | `/dev/nvidiaN` files | GPUs the pod saw |
 |---|---|---|
 | `gpu4-privileged-1` | 8 | All 8 |
 | `gpu4-privileged-2` | 8 | All 8 |
@@ -656,4 +656,4 @@ The pod uses the rails and their sysctls as the node configured them. The ARP po
 
 It fits less well when jobs share nodes, or when the cluster has more than one tenant. Then you have to manage ports by hand. You also need the fix above, or something like it, to keep jobs off each other's GPUs. And the namespace has to use the Privileged level of Pod Security.
 
-[The next part](/posts/getting-rdma-into-kubernetes-pods-part-2-sriov-vfs/) runs the same tests with SR-IOV VFs, on the other pair of nodes. Each pod gets its own VF on each rail, through a device plugin and without `privileged`.
+[The next part](/posts/getting-rdma-into-kubernetes-pods-part-2-sriov-vfs/) runs the same tests with SR-IOV VFs, on both pairs of nodes. Each pod gets its own VF on each rail, through a device plugin and without `privileged`.
