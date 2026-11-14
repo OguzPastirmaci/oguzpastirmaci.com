@@ -1147,3 +1147,5 @@ On nodes with a lower limit, the pod needs a higher `memlock` limit or `IPC_LOCK
 IPvlan worked well for one job per node that uses all 16 rails. It got the full bandwidth of `hostNetwork` without `privileged`. The pods kept their own names, DNS and ports.
 
 In these tests, jobs with 4 GPUs and 8 PFs per node needed the Topology Manager. Without it, the kubelet split the rails without looking at the GPUs. The jobs got 26.95 to 58.84 GB/s instead of about 96 GB/s. With `restricted`, they got the full bandwidth, but the kubelet rejects pods that it cannot align. You also have to plan the address pool for the pods on each node.
+
+[The next part](/posts/getting-rdma-into-kubernetes-pods-part-4-dranet/) runs the same tests with DRANET, on both pairs of nodes. Each pod claims the rails it needs and gets an IPvlan child of each one.
