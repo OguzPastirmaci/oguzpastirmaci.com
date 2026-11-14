@@ -23,7 +23,7 @@ On these nodes, DOCA-OFED lets a process use a RoCE GID only in one case. The in
 
 A VF fixes this. Its network interface moves into the network namespace of the pod. When the interface gets an IP address, the kernel adds a RoCE GID for that address. The GID is on the RDMA device of the VF, so the pod can use it.
 
-These nodes run in the shared RDMA namespace mode of `ib_core`. The current node image uses shared mode by default. The older A100 image in the GID post defaulted to the exclusive mode. In this mode, the network does not use the RDMA CNI. That plugin moves the RDMA device of the VF into the pod, but it works only in the exclusive mode. The GID post covers the modes. Near the end of this post, I test the exclusive mode with the RDMA CNI.
+These nodes run in the shared RDMA namespace mode of `ib_core`. Their `/etc/modprobe.d/ib_core.conf` sets it with `options ib_core netns_mode=1`. The A100 nodes of the [GID post](/posts/why-pods-see-zero-roce-gids-on-doca-ofed/) ran an older image with kernel 6.14. That image used the exclusive mode by default. In the shared mode, the network does not use the RDMA CNI. That plugin moves the RDMA device of the VF into the pod, but it works only in the exclusive mode. The GID post covers the modes. Near the end of this post, I test the exclusive mode with the RDMA CNI.
 
 ## The setup
 
@@ -1552,6 +1552,10 @@ In the NCCL test, the two jobs used different NICs on each node, so they did not
 ### Changing the VF count drains the nodes
 
 Going from 1 to 2 VFs per PF drained each node for about 2 minutes. Creating VFs on PFs that had none did not drain them. A cluster that runs jobs has to plan for these drains.
+
+### Deleting the node policy resets the MTU
+
+I deleted the node policy after the last tests, on the nodes of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/). About two minutes later, the VFs were gone. All 16 rails also had MTU 1500 instead of 4220. The `ResetSriovDevice` function of the config daemon sets the MTU of the PF and removes its VFs. It uses 1500 when it has no saved MTU for the PF. The RoCE MTU of the rails dropped from 4096 to 1024 bytes. One flow on a rail then gave 88.58 Gb/s instead of 96.87 Gb/s. NCCL `all_reduce` on 16 GPUs dropped from about 190 to 168 GB/s. After a reboot, the rails had MTU 4220 again.
 
 ### More moving parts
 
