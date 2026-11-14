@@ -23,7 +23,7 @@ On these nodes, DOCA-OFED lets a process use a RoCE GID only in one case. The in
 
 A VF fixes this. Its network interface moves into the network namespace of the pod. When the interface gets an IP address, the kernel adds a RoCE GID for that address. The GID is on the RDMA device of the VF, so the pod can use it.
 
-These nodes run in the shared RDMA namespace mode of `ib_core`. Their `/etc/modprobe.d/ib_core.conf` sets it with `options ib_core netns_mode=1`. The A100 nodes of the [GID post](/posts/why-pods-see-zero-roce-gids-on-doca-ofed/) ran an older image with kernel 6.14. That image used the exclusive mode by default. In the shared mode, the network does not use the RDMA CNI. That plugin moves the RDMA device of the VF into the pod, but it works only in the exclusive mode. The GID post covers the modes. Near the end of this post, I test the exclusive mode with the RDMA CNI.
+These nodes run in the shared RDMA namespace mode of `ib_core`. Their `/etc/modprobe.d/ib_core.conf` sets it with `options ib_core netns_mode=1`. The A100 nodes of the [GID post](/posts/why-pods-see-zero-roce-gids-on-doca-ofed/) ran an older image, which used the exclusive mode by default. In the shared mode, the network does not use the RDMA CNI. That plugin moves the RDMA device of the VF into the pod, but it works only in the exclusive mode. The GID post covers the modes. Near the end of this post, I test the exclusive mode with the RDMA CNI.
 
 ## The setup
 
