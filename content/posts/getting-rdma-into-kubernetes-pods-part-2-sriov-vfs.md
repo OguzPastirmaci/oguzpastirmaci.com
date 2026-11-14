@@ -7,7 +7,7 @@ tags = ["rdma", "kubernetes", "nccl", "sr-iov", "oke"]
 description = "Part 2 of a series on RDMA in Kubernetes pods for GPU training. Each pod gets its own SR-IOV virtual function on each rail, with 1 or 2 VFs per physical function."
 +++
 
-This series tests four ways to give a Kubernetes pod RDMA for GPU training, on two pairs of A100 nodes. [Part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/) used `hostNetwork` and set the baseline, on the second pair with the same setup. NCCL `all_reduce` reached 190.54 GB/s bus bandwidth at 8 GiB on 16 GPUs. This part covers SR-IOV VFs, part 3 covers IPvlan, and part 4 covers DRA.
+This series tests four ways to give a Kubernetes pod RDMA for GPU training, on two pairs of A100 nodes. [Part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/) used `hostNetwork` and set the baseline, on the second pair with the same setup. NCCL `all_reduce` reached 190.54 GB/s bus bandwidth at 8 GiB on 16 GPUs. This part covers SR-IOV VFs, [part 3](/posts/getting-rdma-into-kubernetes-pods-part-3-ipvlan/) covers IPvlan, and part 4 covers DRA.
 
 With SR-IOV, each port of a NIC is a physical function (PF) that can create virtual functions (VFs). A VF has its own network interface, MAC address and RDMA device. Each pod gets one VF on each rail, and it stays on the pod network. The pod is not privileged. With 1 VF per PF, it got the same bandwidth as `hostNetwork`. NCCL reached 190.55 GB/s.
 
@@ -1813,3 +1813,5 @@ So the exclusive mode needs `rdmaQoS` with the traffic class of the jobs. With i
 All of this is for the shared RDMA mode without the RDMA CNI. In the exclusive mode with the RDMA CNI, the pods saw fewer devices. The network then needs `rdmaQoS`, or the RDMA CNI forces traffic class 0 on each VF.
 
 For two jobs per node, 2 VFs per PF with one resource for each rail worked. Each job got every rail and used the NICs next to its GPUs, at the full bandwidth. In return, it needs 16 policies and networks, and drains when the VF count changes. Two pods also share each port.
+
+[The next part](/posts/getting-rdma-into-kubernetes-pods-part-3-ipvlan/) runs the same tests with IPvlan, on both pairs of nodes. Each pod gets the RDMA devices of the rails and an IPvlan interface on each rail, without `privileged`.
