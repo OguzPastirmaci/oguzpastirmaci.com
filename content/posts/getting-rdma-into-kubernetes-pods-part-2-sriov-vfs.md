@@ -11,7 +11,7 @@ This series tests four ways to give a Kubernetes pod RDMA for GPU training, on t
 
 With SR-IOV, each port of a NIC is a physical function (PF) that can create virtual functions (VFs). A VF has its own network interface, MAC address and RDMA device. Each pod gets one VF on each rail, and it stays on the pod network. The pod is not privileged. With 1 VF per PF, it got the same bandwidth as `hostNetwork`. NCCL reached 190.55 GB/s.
 
-The hard part is sharing the rails between pods. With 1 VF per PF, a pod that takes all 16 rails takes them for the whole node. Two jobs can split the rails, with 4 GPUs and 8 VFs each per node. Each PCIe root of these nodes has 2 GPUs and 2 NICs. NCCL uses GPUDirect RDMA only when the NIC is close enough to the GPU. But the kubelet got the GPUs and the VFs from two device plugins, and did not match them. So many NCCL channels used a NIC on another root, and their data went through CPU memory. The two jobs got 17.95 and 8.99 GB/s. With 2 VFs per PF and one resource for each rail, every pod got a VF on every rail. Two jobs with 4 GPUs per node then got 96.28 and 96.35 GB/s at the same time. In [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/), a job with 4 GPUs per node got 96.64 GB/s.
+The hard part is sharing the rails between pods. With 1 VF per PF, a pod that takes all 16 rails takes them for the whole node. Two jobs can split the rails, with 4 GPUs and 8 VFs each per node. Each PCIe root of these nodes has 2 GPUs and 2 NICs. NCCL uses GPUDirect RDMA only when the NIC is close enough to the GPU. But the kubelet got the GPUs and the VFs from two device plugins, and did not match them. So on one node, NCCL sent the traffic of each job through only the 3 VFs next to its GPUs. On the other node, one job also used NICs on other roots, and that data went through CPU memory. The two jobs got 43.71 and 26.77 GB/s. With the `restricted` Topology Manager policy, the kubelet gave each pod GPUs and VFs on the same NUMA nodes. The two jobs then got 96.28 and 96.35 GB/s at the same time. With 2 VFs per PF and one resource for each rail, every pod got a VF on every rail. Two jobs with 4 GPUs per node then got 96.28 and 96.35 GB/s at the same time. In [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/), a job with 4 GPUs per node got 96.64 GB/s.
 
 I also tested the exclusive RDMA namespace mode with the RDMA CNI. By default, the RDMA CNI forced traffic class 0 on each VF, and `ib_write_bw` got about half. With `rdmaQoS` in the network, it got the full bandwidth.
 
@@ -509,18 +509,20 @@ The port problem of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hos
 
 ### Splitting the rails
 
-With 1 VF per PF, a node has 16 VFs, so only one pod per node can get every rail. For two jobs per node, each job asked for 8 VFs. Both jobs started. Each pod got 8 VF interfaces, on the rails of its VFs. These are the pods on one node:
+With 1 VF per PF, a node has 16 VFs, so only one pod per node can get every rail. For two jobs per node, each job asked for 8 VFs. I ran these jobs on the nodes of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/). Both jobs started. Each pod got 8 VF interfaces, on the rails of its VFs. These are the pods on one node:
 
 | Job | GPUs | Rails of its VFs |
 |---|---|---|
-| First | 2, 3, 4, 5 | `rdma1`, `rdma2`, `rdma3`, `rdma5`, `rdma6`, `rdma8`, `rdma12`, `rdma14` |
-| Second | 0, 1, 6, 7 | `rdma0`, `rdma4`, `rdma7`, `rdma9`, `rdma10`, `rdma11`, `rdma13`, `rdma15` |
+| First | 2, 3, 4, 5 | `rdma0`, `rdma1`, `rdma2`, `rdma4`, `rdma8`, `rdma11`, `rdma12`, `rdma14` |
+| Second | 0, 1, 6, 7 | `rdma3`, `rdma5`, `rdma6`, `rdma7`, `rdma9`, `rdma10`, `rdma13`, `rdma15` |
 
 By PCIe root, the two jobs got these devices:
 
 [![Which GPUs and VFs the two jobs got on one node, by PCIe root](/images/vf-split-rails.png)](/images/vf-split-rails.png)
 
-The VFs did not follow the GPUs. In [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/), NCCL put GPUs 0, 1, 6 and 7 on `rdma0` to `rdma3` and `rdma12` to `rdma15`. The other 4 GPUs used `rdma4` to `rdma11`. Here, each job got VFs on NICs on both sides. The two ports of one NIC sometimes went to different jobs. In each job, 4 of the 6 channels had a network connection without GPUDirect RDMA, all on the other node. NCCL uses GPUDirect RDMA only up to a set distance between the NIC and the GPU. `NCCL_NET_GDR_LEVEL` sets that distance, and by default NCCL picks it from the topology. Without GPUDirect RDMA, the data goes through CPU memory.
+The VFs did not follow the GPUs. In [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/), NCCL put GPUs 0, 1, 6 and 7 on `rdma0` to `rdma3` and `rdma12` to `rdma15`. The other 4 GPUs used `rdma4` to `rdma11`. Here, each job got VFs on NICs on both sides. The two ports of one NIC sometimes went to different jobs.
+
+On this node, each job had only 3 VFs on the PCIe roots of its GPUs. Those were `rdma4`, `rdma8` and `rdma11` for the first job, and `rdma3`, `rdma13` and `rdma15` for the second. NCCL sent all the network traffic of each job on this node through these 3 VFs, with GPUDirect RDMA. On the other node, the second job also used NICs on other roots for 2 of its GPUs. NCCL uses GPUDirect RDMA only up to a set distance between the NIC and the GPU. `NCCL_NET_GDR_LEVEL` sets that distance, and by default NCCL picks it from the topology. Without GPUDirect RDMA, the data goes through CPU memory.
 
 [![The 4 PCIe roots of one BM.GPU.B4.8 node, each with 2 GPUs and 2 NICs, and the two data paths between a GPU and a NIC](/images/gpu-nic-topology.png)](/images/gpu-nic-topology.png)
 
@@ -528,10 +530,55 @@ The bandwidth dropped:
 
 | Job | `busbw` at 8 GiB, out of place | In place |
 |---|---|---|
-| First | 17.95 GB/s | 17.93 GB/s |
-| Second | 8.99 GB/s | 25.63 GB/s |
+| First | 43.71 GB/s | 40.72 GB/s |
+| Second | 26.77 GB/s | 26.89 GB/s |
 
-The second job ran longer, and its in-place half ran after the first job had finished. With the CRI-O fix of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/), two jobs like these got 96.40 and 96.36 GB/s at the same time.
+With the CRI-O fix of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/), two jobs like these got 96.40 and 96.36 GB/s at the same time.
+
+One job alone, with the same request, got 96.22 GB/s. The kubelet gave it GPUs 0 to 3, and 5 or 6 of its 8 VFs on their PCIe roots. Every NCCL channel used GPUDirect RDMA. So with the policy `none`, the result depends on which VFs the pod gets.
+
+### Aligning the VFs with the Topology Manager
+
+The kubelet has a Topology Manager that aligns devices by NUMA node. It is off by default, with the policy `none`. On these nodes, each NUMA node with GPUs has 2 GPUs and the 2 NICs next to them:
+
+| NUMA node | GPUs | Rails |
+|---|---|---|
+| 1 | 2, 3 | `rdma4` to `rdma7` |
+| 3 | 0, 1 | `rdma0` to `rdma3` |
+| 5 | 6, 7 | `rdma12` to `rdma15` |
+| 7 | 4, 5 | `rdma8` to `rdma11` |
+
+So on these nodes, aligning by NUMA node also puts each GPU next to its NIC. I added two settings to `/etc/kubernetes/kubelet-config.json` on both GPU nodes and restarted the kubelet:
+
+```json
+  "topologyManagerPolicy": "restricted",
+  "topologyManagerScope": "pod"
+```
+
+The kubelet logged the new policy:
+
+```
+"Creating topology manager with policy per scope" topologyPolicyName="restricted" topologyScopeName="pod" topologyPolicyOptions={"PreferClosestNUMA":false,"MaxAllowableNUMANodes":8}
+```
+
+With `restricted`, the kubelet admits a pod only if it can align all of its devices. They must fit on the smallest set of NUMA nodes. Otherwise, it rejects the pod. I ran the same jobs again:
+
+| Run with 4 GPUs and 8 VFs per node | Policy `none` | Policy `restricted` |
+|---|---|---|
+| One job alone | 96.22 GB/s | 96.66 GB/s |
+| Two jobs at the same time | 43.71 and 26.77 GB/s | 96.28 and 96.35 GB/s |
+
+Every pod got its 4 GPUs and its 8 VFs on the same 2 NUMA nodes. In the two-job run, one job got NUMA nodes 5 and 7, and the other got 1 and 3. Every NCCL channel used GPUDirect RDMA. The results match the CRI-O fix of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/).
+
+`restricted` has a downside too, because it rejects pods that it cannot align. A job with 4 GPUs and 16 VFs per node is an example. The VFs need all 4 NUMA nodes with NICs, but the GPUs need only 2. The scheduler placed its workers, and then the kubelet rejected them:
+
+```
+Warning   TopologyAffinityError   Resources cannot be allocated with Topology locality
+```
+
+The scheduler does not know about NUMA nodes, so it cannot avoid this. The job with 8 GPUs and 16 VFs still ran, at 189.06 GB/s.
+
+I changed the kubelet configuration by hand on the two nodes, and I put it back after the tests. For real use, the change belongs in the node setup.
 
 ## Two VFs per PF
 
