@@ -27,7 +27,7 @@ On OKE, [DRANET](https://github.com/kubernetes-sigs/dranet) has a provider with 
 
 ## The setup
 
-All NCCL jobs ran on the nodes of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/). The other tests ran on the first pair of nodes. The setup and the image are the same as in part 1:
+All NCCL jobs ran on the nodes of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/). The other tests ran on the first pair of nodes. Before the NCCL jobs, I repeated the installs, the test pods and the rail test there. The setup and the image are the same as in part 1:
 
 - 2 x BM.GPU.B4.8 on OKE v1.36.4, with CRI-O 1.36.3
 - Each node has 8 A100 GPUs and 16 RoCE rails at 100 Gb/s, all in the IPv4 subnet `10.224.0.0/12`
@@ -298,7 +298,7 @@ done
 
 Every rail gave 96.87 or 96.88 Gb/s. In [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/), `hostNetwork` gave 96.86 to 96.88 Gb/s.
 
-I deleted the two test pods first, because they held all 16 rails of each node. The NCCL job sets neither `NCCL_IB_HCA` nor `NCCL_IB_GID_INDEX`. NCCL finds the devices and the GID index itself, as in [part 3](/posts/getting-rdma-into-kubernetes-pods-part-3-ipvlan/). The DRANET OKE page also says to leave the GID index unset. The job takes the GPUs from the device plugin and the rails from the claim:
+I deleted the two test pods first, because they held all 16 rails of each node. I kept the `all-rails` template of `dranet-pods.yaml`, because the NCCL job uses it too. The NCCL job sets neither `NCCL_IB_HCA` nor `NCCL_IB_GID_INDEX`. NCCL finds the devices and the GID index itself, as in [part 3](/posts/getting-rdma-into-kubernetes-pods-part-3-ipvlan/). The DRANET OKE page also says to leave the GID index unset. The job takes the GPUs from the device plugin and the rails from the claim:
 
 {{< code language="yaml" title="nccl-dranet.yaml" open="false" >}}
 # NCCL all_reduce_perf over the 16 DRANET rails of each GPU node.
@@ -393,7 +393,7 @@ This is the result:
 | IPvlan with Multus (part 3) | 189.15 GB/s |
 | DRANET | 190.63 GB/s |
 
-Part 2 ran these jobs on the first pair of nodes, and the other parts on the second pair.
+[Part 2](/posts/getting-rdma-into-kubernetes-pods-part-2-sriov-vfs/) ran these jobs on the first pair of nodes, and the other parts on the second pair.
 
 ## Sharing the nodes
 
@@ -513,7 +513,7 @@ A rail goes to one claim at a time, so the two jobs got different rails. In both
 | 2 | `10.140.86.84` | 0, 1, 2, 3 | 4, 5, 6, 7 |
 | 2 | `10.140.89.190` | 2, 3, 4, 5 | 0, 1, 6, 7 |
 
-The scheduler picked the rails before the kubelet picked the GPUs. So the rails did not follow the GPUs.
+The scheduler picked the rails before the kubelet picked the GPUs. So the rails followed the GPUs only by chance. In run 2, both jobs on `10.140.86.84` happened to get GPUs on the roots of their rails.
 
 In run 2, NCCL used the NICs of only one root on each node. Each job had 4 channels, all with GPUDirect RDMA. On `10.140.89.190`, job a used the NICs of `rdma4` to `rdma7`:
 
@@ -531,7 +531,7 @@ In run 1, no GPU of either job shared a root with its rails on `10.140.86.84`. S
 NCCL INFO Channel 00/0 : 5[1] -> 0[0] [send] via NET/IB/8
 ```
 
-Without GPUDirect RDMA, the data went through CPU memory and crossed the two CPU sockets of the node. The two runs gave very different results:
+The data also crossed between the two CPU sockets of the node. The two runs gave very different results:
 
 | Run | Job | `busbw` at 8 GiB, out of place | In place |
 |---|---|---|---|
@@ -908,12 +908,11 @@ The jobs did not get the same roots on both nodes. On one node, job a got the ro
 | DRANET, GPUs from the device plugin, run 2 | 48.50 and 48.51 GB/s |
 | DRANET and DRA for the GPUs | 96.29 and 96.34 GB/s |
 
-
 These are the devices of the jobs on `10.140.89.190`. Both runs with the device plugin gave the same devices there:
 
 [![Which GPUs and rails the two jobs got on one node, with GPUs from the device plugin and with GPUs from DRA](/images/dranet-alignment.png)](/images/dranet-alignment.png)
 
-The Topology Manager stayed at `none` on both nodes for all DRANET runs.
+The Topology Manager stayed at `none` on all four nodes for all DRANET runs.
 
 The DRANET paper measured the same effect on Google Cloud, with B200 GPUs. Each NCCL process there had one GPU and one NIC. With the GPU from the device plugin, `all_reduce` reached 29.68 GB/s at 8 GB. The paper repeated each test 100 times. With the GPU and the NIC on the same PCIe root, it reached 46.93 GB/s, 58.1% more. Here, with 4 GPUs and 8 rails per job, the aligned jobs got twice the bandwidth of run 2.
 

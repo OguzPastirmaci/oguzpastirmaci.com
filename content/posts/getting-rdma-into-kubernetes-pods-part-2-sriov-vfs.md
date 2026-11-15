@@ -535,7 +535,7 @@ The bandwidth dropped:
 
 With the CRI-O fix of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/), two jobs like these got 96.40 and 96.36 GB/s at the same time.
 
-One job alone, with the same request, got 96.22 GB/s. The kubelet gave it GPUs 0 to 3, and 5 or 6 of its 8 VFs on their PCIe roots. Every NCCL channel used GPUDirect RDMA. So without the Topology Manager, the result depends on which VFs the pod gets. In the worst case, no GPU of a job shares a root with its VFs. [Part 4](/posts/getting-rdma-into-kubernetes-pods-part-4-dranet/#gpus-from-the-device-plugin) measured that case on one node, at 4.27 and 5.77 GB/s.
+One job alone, with the same request, got 96.22 GB/s. The kubelet gave it GPUs 0 to 3, and 5 or 6 of its 8 VFs on their PCIe roots. Every NCCL channel used GPUDirect RDMA. So without the Topology Manager, the result depends on which VFs the pod gets. In the worst case, no GPU of a job shares a root with its VFs. [Part 4](/posts/getting-rdma-into-kubernetes-pods-part-4-dranet/#gpus-from-the-device-plugin) measured that case on one node, with two jobs at the same time. They got 4.27 and 5.77 GB/s.
 
 ### Aligning the VFs with the Topology Manager
 

@@ -1041,7 +1041,7 @@ I also ran the first job alone. It got 26.95 GB/s, so sharing the node was not t
 NCCL INFO Channel 01/0 : 5[1] -> 0[0] [send] via NET/IB/9
 ```
 
-In the worst case, no GPU of a job shares a root with its PFs. [Part 4](/posts/getting-rdma-into-kubernetes-pods-part-4-dranet/#gpus-from-the-device-plugin) measured that case on one node, at 4.27 and 5.77 GB/s.
+In the worst case, no GPU of a job shares a root with its PFs. [Part 4](/posts/getting-rdma-into-kubernetes-pods-part-4-dranet/#gpus-from-the-device-plugin) measured that case on one node, with two jobs at the same time. They got 4.27 and 5.77 GB/s.
 
 With the CRI-O fix of [part 1](/posts/getting-rdma-into-kubernetes-pods-part-1-hostnetwork/), two jobs like these got 96.40 and 96.36 GB/s at the same time.
 
